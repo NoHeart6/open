@@ -12,10 +12,12 @@ function audit(tool: string, owner: string, ok: boolean, ms: number) {
   console.log(JSON.stringify({ t: "audit", tool, owner, ok, ms }));
 }
 
+const OWNER_OVERRIDE = process.env.GATEWAY_OWNER;
+
 async function gateway<T>(path: string, opts: RequestInit & { owner: string; idempotency?: string }): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (GATEWAY_TOKEN) headers.authorization = `Bearer ${GATEWAY_TOKEN}`;
-  headers["x-owner-id"] = opts.owner;
+  headers["x-owner-id"] = OWNER_OVERRIDE ?? opts.owner;
   if (opts.idempotency) headers["x-idempotency-key"] = opts.idempotency;
   const r = await fetch(`${GATEWAY_URL}${path}`, { ...opts, headers });
   if (!r.ok) throw new Error(`gateway ${r.status}: ${await r.text()}`);
