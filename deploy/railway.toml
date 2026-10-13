@@ -1,0 +1,7 @@
+[build]
+builder = "dockerfile"
+dockerfile = "deploy/gateway.Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"
