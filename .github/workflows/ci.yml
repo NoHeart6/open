@@ -1,0 +1,56 @@
+name: checks-and-artifacts
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache-dependency-path: apps/gateway/go.sum
+      - run: test -z "$(gofmt -l *.go)" && go vet ./... && go test -race -count=1 ./...
+        working-directory: apps/gateway
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        working-directory: apps/gateway
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/mcp-server/package-lock.json
+      - run: npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm audit
+        working-directory: apps/mcp-server
+      - run: docker compose --env-file .env.example -f infra/docker/compose.yaml build
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - run: cargo fmt --check; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo clippy --locked --all-targets -- -D warnings; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo build --locked; if ($LASTEXITCODE) { exit $LASTEXITCODE }; New-Item -ItemType Directory -Force ../../artifacts | Out-Null; Copy-Item target/debug/opencommander-agent.exe ../../artifacts/opencommander-agent.exe; cargo test --locked; exit $LASTEXITCODE
+        working-directory: apps/windows-agent
+      - run: cargo install cargo-audit --locked; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo audit; exit $LASTEXITCODE
+        working-directory: apps/windows-agent
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache-dependency-path: apps/gateway/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: $env:RUSTFLAGS='-C target-feature=+crt-static'; .\scripts\build.ps1 -Release
+      - run: npx tsx test/e2e.ts --headless
+        working-directory: apps/mcp-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencommander-windows-x64-unsigned
+          path: |
+            artifacts/
+            LICENSE
+            docs/

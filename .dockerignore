@@ -1,0 +1,9 @@
+.git
+.tools
+.runtime
+artifacts
+**/target
+**/node_modules
+**/dist
+secrets
+.env

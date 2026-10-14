@@ -1,0 +1,13 @@
+.git/
+.tools/
+.runtime/
+artifacts/
+target/
+**/node_modules/
+**/dist/
+secrets/
+.env
+*.db*
+*.log
+credentials.dpapi
+!releases/windows/OpenCommanderSetup.exe

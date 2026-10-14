@@ -1,0 +1,11 @@
+{$MCP_DOMAIN} {
+    request_body { max_size 256KB }
+    reverse_proxy mcp:3000
+}
+{$GATEWAY_DOMAIN} {
+    @agent path /v1/*
+    handle @agent {
+        reverse_proxy gateway:8080
+    }
+    handle { respond "Not found" 404 }
+}

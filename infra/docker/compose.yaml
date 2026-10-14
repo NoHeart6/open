@@ -1,0 +1,57 @@
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: infra/docker/gateway.Dockerfile
+    restart: unless-stopped
+    environment:
+      BRIDGE_KEY_FILE: /run/secrets/bridge_key
+      GATEWAY_SIGNING_SEED_FILE: /run/secrets/gateway_seed
+    secrets: [bridge_key, gateway_seed]
+    volumes: [gateway_data:/data]
+    networks: [backend]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  mcp:
+    build:
+      context: ../..
+      dockerfile: infra/docker/mcp.Dockerfile
+    restart: unless-stopped
+    environment:
+      MCP_RESOURCE: https://${MCP_DOMAIN:?set MCP_DOMAIN}/mcp
+      OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:?set OIDC_JWKS_URL}
+      GATEWAY_URL: http://gateway:8080
+      BRIDGE_KEY_FILE: /run/secrets/bridge_key
+    secrets: [bridge_key]
+    depends_on:
+      gateway: {condition: service_healthy}
+    networks: [backend, edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  proxy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN:?set MCP_DOMAIN}
+      GATEWAY_DOMAIN: ${GATEWAY_DOMAIN:?set GATEWAY_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend, edge]
+    depends_on: [mcp, gateway]
+secrets:
+  bridge_key: {file: ../../secrets/bridge.key}
+  gateway_seed: {file: ../../secrets/gateway.seed}
+volumes:
+  gateway_data:
+  caddy_data:
+  caddy_config:
+networks:
+  backend:
+    internal: true
+  edge:

@@ -1,0 +1,455 @@
+use crate::{desktop, files, policy::Policy};
+use anyhow::{Result, bail, ensure};
+use serde_json::{Value, json};
+use std::{
+    process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+use sysinfo::{Disks, Networks, System, Users};
+use tokio::{io::AsyncReadExt, process::Command};
+
+pub async fn execute(
+    p: &Policy,
+    action: &str,
+    a: Value,
+    cancel: Arc<AtomicBool>,
+    seconds: u64,
+    output: Option<Output>,
+    state: &std::path::Path,
+) -> Result<Value> {
+    match action {
+        "file_batch" | "file_undo" => {
+            let (p, state, undo) = (p.clone(), state.to_owned(), action == "file_undo");
+            tokio::task::spawn_blocking(move || {
+                if undo {
+                    crate::batch::undo(&p, &state, &a)
+                } else {
+                    crate::batch::execute(&p, &state, &a)
+                }
+            })
+            .await?
+        }
+        "clipboard_access" => {
+            tokio::task::spawn_blocking(move || crate::clipboard::execute(&a)).await?
+        }
+        "system_inventory" => crate::system::execute(&a).await,
+        "desktop_inspect" | "desktop_automation" => {
+            let write = action == "desktop_automation";
+            tokio::task::spawn_blocking(move || crate::automation::execute(&a, write)).await?
+        }
+        "file_recovery" => {
+            let (p, state) = (p.clone(), state.to_owned());
+            tokio::task::spawn_blocking(move || crate::recovery::execute(&p, &state, &a)).await?
+        }
+        "file_operation" if a["op"] == "delete" => {
+            let (p, state) = (p.clone(), state.to_owned());
+            tokio::task::spawn_blocking(move || crate::recovery::trash(&p, &state, &a)).await?
+        }
+        "terminal_execute" => terminal_with_output(p, &a, cancel, seconds, output).await,
+        "application_launch" => {
+            let path = p.application(
+                a["path"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing executable path"))?,
+            )?;
+            let mut command = Command::new(path);
+            if let Some(args) = a["args"].as_array() {
+                ensure!(args.len() <= 32, "Too many arguments");
+                for arg in args {
+                    command.arg(
+                        arg.as_str()
+                            .ok_or_else(|| anyhow::anyhow!("Invalid application argument"))?,
+                    );
+                }
+            }
+            if let Some(cwd) = a["cwd"].as_str() {
+                command.current_dir(p.path(cwd)?);
+            }
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let mut child = command.spawn()?;
+            let pid = child.id();
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
+            Ok(json!({"pid":pid}))
+        }
+        "system_info" => tokio::task::spawn_blocking(system_info).await?,
+        "process_manage" => tokio::task::spawn_blocking(move || processes(&a)).await?,
+        "desktop_windows" => tokio::task::spawn_blocking(desktop::windows).await?,
+        "desktop_screenshot" => tokio::task::spawn_blocking(desktop::screenshot).await?,
+        "desktop_interact" => tokio::task::spawn_blocking(move || desktop::interact(&a)).await?,
+        "file_read" | "file_write" | "file_search" | "file_operation" => {
+            let p = p.clone();
+            let action = action.to_owned();
+            tokio::task::spawn_blocking(move || files::execute(&p, &action, &a)).await?
+        }
+        _ => bail!("Unsupported action"),
+    }
+}
+fn system_info() -> Result<Value> {
+    let mut s = System::new_all();
+    s.refresh_all();
+    std::thread::sleep(Duration::from_millis(200));
+    s.refresh_cpu_usage();
+    let disks:Vec<Value>=Disks::new_with_refreshed_list().iter().map(|d|json!({"name":d.name().to_string_lossy(),"mount":d.mount_point(),"total_bytes":d.total_space(),"available_bytes":d.available_space()})).collect();
+    let networks:Vec<Value>=Networks::new_with_refreshed_list().iter().take(50).map(|(n,d)|json!({"name":n,"received_bytes":d.total_received(),"sent_bytes":d.total_transmitted()})).collect();
+    Ok(
+        json!({"os":System::name(),"os_version":System::os_version(),"host":System::host_name(),"uptime_seconds":System::uptime(),"cpu_count":s.cpus().len(),"cpu":s.cpus().first().map(|c|c.brand()),"cpu_usage_percent":s.global_cpu_usage(),"memory_total_bytes":s.total_memory(),"memory_used_bytes":s.used_memory(),"disks":disks,"networks":networks,"agent_version":env!("CARGO_PKG_VERSION")}),
+    )
+}
+fn processes(a: &Value) -> Result<Value> {
+    let s = System::new_all();
+    let users = Users::new_with_refreshed_list();
+    if a["op"] == "terminate" {
+        let pid = a["pid"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Missing pid"))?;
+        ensure!(
+            pid > 4 && pid <= u32::MAX as u64 && pid != u64::from(std::process::id()),
+            "Protected process"
+        );
+        let proc = s
+            .process(sysinfo::Pid::from_u32(pid as u32))
+            .ok_or_else(|| anyhow::anyhow!("Process not found"))?;
+        ensure!(proc.kill(), "OS denied process termination");
+        return Ok(json!({"pid":pid,"termination_requested":true}));
+    }
+    ensure!(a["op"] == "list", "Unsupported process operation");
+    let procs:Vec<Value>=s.processes().iter().take(200).map(|(pid,p)|json!({"pid":pid.as_u32(),"name":p.name().to_string_lossy(),"memory_bytes":p.memory(),"cpu_percent":p.cpu_usage(),"owner":p.user_id().and_then(|id|users.get_user_by_id(id)).map(|u|u.name())})).collect();
+    Ok(json!({"processes":procs,"limit":200}))
+}
+#[derive(Clone)]
+pub struct Output {
+    pub state: std::path::PathBuf,
+    pub task_id: String,
+    pub sender: tokio::sync::mpsc::Sender<Value>,
+    pub sequence: Arc<std::sync::atomic::AtomicU64>,
+}
+pub fn output_path(state: &std::path::Path, id: &str, seq: u64) -> Result<std::path::PathBuf> {
+    crate::journal_path(state, id)?;
+    ensure!((1..=512).contains(&seq), "Invalid output sequence");
+    Ok(state.join("output").join(format!("{id}.{seq}.dpapi")))
+}
+async fn drain<R: tokio::io::AsyncRead + Unpin>(
+    mut r: R,
+    stream: &'static str,
+    output: Option<Output>,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut result = vec![];
+    let mut buffer = [0; 4096];
+    let mut truncated = false;
+    loop {
+        let n = r.read(&mut buffer).await?;
+        if n == 0 {
+            break;
+        }
+        let available = 65536usize.saturating_sub(result.len());
+        result.extend_from_slice(&buffer[..n.min(available)]);
+        truncated |= n > available;
+        if let Some(ref output) = output {
+            let seq = output.sequence.fetch_add(1, Ordering::SeqCst) + 1;
+            if seq <= 512 {
+                let chunk = json!({"type":"output","task_id":output.task_id,"seq":seq,"stream":stream,"text":String::from_utf8_lossy(&buffer[..n])});
+                let persist = output_path(&output.state, &output.task_id, seq).and_then(|path| {
+                    crate::storage::save_bounded(
+                        &path,
+                        &serde_json::to_vec(&chunk)?,
+                        4096,
+                        32 * 1024 * 1024,
+                    )
+                });
+                persist.map_err(std::io::Error::other)?;
+                // Durable chunks are retransmitted after reconnect if the writer is full.
+                let _ = output.sender.try_send(chunk);
+            } else {
+                truncated = true;
+            }
+        }
+    }
+    Ok((result, truncated))
+}
+#[cfg(windows)]
+struct Job(windows_sys::Win32::Foundation::HANDLE);
+#[cfg(windows)]
+unsafe impl Send for Job {}
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+#[cfg(windows)]
+fn job(pid: u32) -> Result<Job> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::{JobObjects::*, Threading::*},
+    };
+    unsafe {
+        let j = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        ensure!(!j.is_null(), "Cannot create process job");
+        let guard = Job(j);
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ensure!(
+            SetInformationJobObject(
+                j,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const _,
+                std::mem::size_of_val(&info) as u32
+            ) != 0,
+            "Job limit failed"
+        );
+        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+        ensure!(!process.is_null(), "Cannot open child process");
+        let ok = AssignProcessToJobObject(j, process);
+        CloseHandle(process);
+        ensure!(ok != 0, "Cannot assign child process to cancellation job");
+        Ok(guard)
+    }
+}
+#[cfg(windows)]
+fn resume_child(pid: u32) -> Result<()> {
+    use windows_sys::Win32::{
+        Foundation::*,
+        System::{Diagnostics::ToolHelp::*, Threading::*},
+    };
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        ensure!(
+            snapshot != INVALID_HANDLE_VALUE,
+            "Cannot enumerate suspended child thread"
+        );
+        let guard = Job(snapshot);
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..Default::default()
+        };
+        let mut found = Vec::new();
+        let mut valid = Thread32First(guard.0, &mut entry);
+        while valid != 0 {
+            if entry.th32OwnerProcessID == pid {
+                found.push(entry.th32ThreadID);
+            }
+            valid = Thread32Next(guard.0, &mut entry);
+        }
+        ensure!(
+            found.len() == 1,
+            "Suspended child must have exactly one primary thread"
+        );
+        let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, found[0]);
+        ensure!(!thread.is_null(), "Cannot open suspended child thread");
+        let thread = Job(thread);
+        ensure!(
+            ResumeThread(thread.0) == 1,
+            "Unexpected primary thread suspension state"
+        );
+    }
+    Ok(())
+}
+#[cfg(test)]
+pub async fn terminal(
+    p: &Policy,
+    a: &Value,
+    cancel: Arc<AtomicBool>,
+    seconds: u64,
+) -> Result<Value> {
+    terminal_with_output(p, a, cancel, seconds, None).await
+}
+pub async fn terminal_with_output(
+    p: &Policy,
+    a: &Value,
+    cancel: Arc<AtomicBool>,
+    seconds: u64,
+    output: Option<Output>,
+) -> Result<Value> {
+    let cwd = p.path(
+        a["cwd"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing cwd"))?,
+    )?;
+    let text = a["command"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing command"))?;
+    ensure!(
+        !text.is_empty() && text.len() <= 16384,
+        "Invalid command size"
+    );
+    let mut command = match a["shell"].as_str().unwrap_or("powershell") {
+        "powershell" => {
+            let mut c = Command::new("powershell.exe");
+            c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", text]);
+            c
+        }
+        "cmd" => {
+            let mut c = Command::new("cmd.exe");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                c.as_std_mut().raw_arg(format!("/D /S /C \"{text}\""));
+            }
+            #[cfg(not(windows))]
+            c.args(["/D", "/S", "/C", text]);
+            c
+        }
+        _ => bail!("Unsupported shell"),
+    };
+    if let Some(env) = a["env"].as_object() {
+        ensure!(env.len() <= 32, "Too many environment variables");
+        for (key, value) in env {
+            ensure!(
+                !key.is_empty() && key.len() <= 128 && !key.contains(['=', '\0']),
+                "Invalid environment variable"
+            );
+            let v = value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Invalid environment value"))?;
+            ensure!(
+                v.len() <= 2048 && !v.contains('\0'),
+                "Invalid environment value"
+            );
+            command.env(key, v);
+        }
+    }
+    command
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000 | 0x00000004);
+    let mut child = command.spawn()?;
+    #[cfg(windows)]
+    let _job = match job(child
+        .id()
+        .ok_or_else(|| anyhow::anyhow!("Missing child PID"))?)
+    {
+        Ok(j) => j,
+        Err(e) => {
+            child.kill().await?;
+            return Err(e);
+        }
+    };
+    #[cfg(windows)]
+    if let Err(error) = resume_child(
+        child
+            .id()
+            .ok_or_else(|| anyhow::anyhow!("Missing child PID"))?,
+    ) {
+        child.kill().await?;
+        return Err(error);
+    }
+    let out = tokio::spawn(drain(
+        child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Missing stdout"))?,
+        "stdout",
+        output.clone(),
+    ));
+    let err = tokio::spawn(drain(
+        child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Missing stderr"))?,
+        "stderr",
+        output.clone(),
+    ));
+    let end = tokio::time::Instant::now() + Duration::from_secs(seconds);
+    let status = loop {
+        if cancel.load(Ordering::SeqCst) || tokio::time::Instant::now() >= end {
+            #[cfg(windows)]
+            drop(_job);
+            let _ = child.kill().await;
+            out.abort();
+            err.abort();
+            bail!(if cancel.load(Ordering::SeqCst) {
+                "Command cancelled"
+            } else {
+                "Command timed out"
+            });
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    #[cfg(windows)]
+    drop(_job);
+    let (stdout, out_truncated) = out.await??;
+    let (stderr, err_truncated) = err.await??;
+    Ok(
+        json!({"exit_code":status.code(),"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"output_truncated":out_truncated||err_truncated,"streaming":output.is_some(),"output_last_sequence":output.map(|o|o.sequence.load(Ordering::SeqCst).min(512))}),
+    )
+}
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use anyhow::Context;
+    #[tokio::test]
+    async fn suspended_child_cannot_run_before_job_assignment() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let marker = dir.path().join("spawned.txt");
+        let mut command = Command::new("powershell.exe");
+        command
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(format!(
+                "Set-Content -LiteralPath '{}' -Value 'guarded'",
+                marker.to_string_lossy().replace('\'', "''")
+            ))
+            .creation_flags(0x08000000 | 0x00000004)
+            .kill_on_drop(true);
+        let mut child = command.spawn()?;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        ensure!(
+            !marker.exists(),
+            "Suspended child performed an effect before assignment"
+        );
+        let guard = job(child.id().context("Missing child")?)?;
+        resume_child(child.id().context("Missing child")?)?;
+        ensure!(child.wait().await?.success());
+        ensure!(std::fs::read_to_string(marker)?.contains("guarded"));
+        drop(guard);
+        Ok(())
+    }
+    #[tokio::test]
+    async fn execution_timeout_cancel_and_output_bound() -> Result<()> {
+        let t = tempfile::tempdir()?;
+        let p = Policy {
+            roots: vec![t.path().to_path_buf()],
+            protected_paths: vec![],
+            applications: vec![],
+            allow_all_applications: false,
+            allow_modify: true,
+            allow_screenshots: false,
+            ask_before_sensitive: true,
+        };
+        let a =
+            json!({"cwd":t.path(),"shell":"powershell","command":"Write-Output 'verified-rust'"});
+        let flag = Arc::new(AtomicBool::new(false));
+        ensure!(
+            terminal(&p, &a, flag.clone(), 10).await?["stdout"]
+                .as_str()
+                .unwrap()
+                .contains("verified-rust")
+        );
+        let slow = json!({"cwd":t.path(),"command":"Start-Sleep -Seconds 10"});
+        ensure!(terminal(&p, &slow, flag.clone(), 1).await.is_err());
+        flag.store(true, Ordering::SeqCst);
+        ensure!(terminal(&p, &slow, flag, 10).await.is_err());
+        let loud = json!({"cwd":t.path(),"command":"Write-Output ('x' * 100000)"});
+        let r = terminal(&p, &loud, Arc::new(AtomicBool::new(false)), 10).await?;
+        ensure!(r["output_truncated"] == true);
+        ensure!(r["stdout"].as_str().unwrap().len() <= 65536);
+        Ok(())
+    }
+}
