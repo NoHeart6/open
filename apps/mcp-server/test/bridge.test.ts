@@ -32,6 +32,10 @@ test('typed operation inputs reject traversal-independent malformed requests',()
  assert.equal(actions.file_read.schema.safeParse({path:'C:\\test',limit:999999}).success,false);
  assert.equal(actions.desktop_interact.schema.safeParse({op:'shortcut',keys:['DELETE_ALL']}).success,false);
  assert.equal(actions.file_write.schema.safeParse({path:'C:\\test',text:'x',expected_sha256:'wrong'}).success,false);
+ assert.equal(actions.terminal_execute.schema.safeParse({cwd:'C:\\test',command:'fixture',interactive:true,stdin:'hello\n'}).success,true);
+ assert.equal(actions.terminal_input.schema.safeParse({target_task_id:'fixture-terminal',text:'hello\n'}).success,true);
+ assert.equal(actions.terminal_input.schema.safeParse({target_task_id:'fixture-terminal',text:'x'.repeat(16385)}).success,false);
+ assert.equal(actions.terminal_input.schema.safeParse({target_task_id:'short',eof:true}).success,false);
 });
 test('real MCP SDK discovery, schema errors, permission errors and auth challenge',async()=>{
  const listener=app(c).listen(0,'127.0.0.1');await new Promise<void>(resolve=>listener.once('listening',resolve));
@@ -50,6 +54,7 @@ test('real MCP SDK discovery, schema errors, permission errors and auth challeng
    assert.equal(modern.getProtocolEra(),'modern');assert.equal((await modern.listTools()).tools.length,tools.tools.length);
   }finally{await modern.close()}
   const denied=await client.callTool({name:'terminal_execute',arguments:{device_id:'test-device',idempotency_key:'test-request',command:'echo hi',cwd:'C:\\test'}});assert.equal(denied.isError,true);assert.match(JSON.stringify(denied),/control scope/);
+  const inputDenied=await client.callTool({name:'terminal_input',arguments:{device_id:'test-device',idempotency_key:'test-input-request',target_task_id:'fixture-terminal',text:'hello\n'}});assert.equal(inputDenied.isError,true);assert.match(JSON.stringify(inputDenied),/control scope/);
   const invalid=await client.callTool({name:'file_read',arguments:{device_id:'test-device',idempotency_key:'test-request',path:'C:\\test',limit:999999}});assert.equal(invalid.isError,true);
   const unavailable=await client.callTool({name:'device_list',arguments:{}});assert.equal(unavailable.isError,true);
  }finally{await client.close();await new Promise<void>((resolve,reject)=>listener.close(e=>e?reject(e):resolve()));}

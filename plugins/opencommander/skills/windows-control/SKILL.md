@@ -11,6 +11,10 @@ Use previews and compare-and-swap hashes before changing existing files. Sensiti
 
 Application launch uses the locally saved allowlist unless system_info.workspace.allow_all_applications is true. In all-applications mode, use the existing absolute executable path, including apps outside the approved file roots. The working directory must still be inside an approved root. The mode does not elevate Windows privileges.
 
+Up to four terminal_execute tasks can run concurrently, so a foreground server does not block a second command or desktop reads. Each task has a deadline, up to 600 seconds. Use task_output for live stdout/stderr and task_cancel on the terminal task to stop its process tree.
+
+For stdin, start terminal_execute with interactive=true and a command that reads its stdin pipe. Wait for the application's ready prompt in task_output, then call terminal_input with target_task_id, exact text (including a newline for line input), a fresh idempotency key, and eof=false. Poll the input request's own task ID for the write receipt, then inspect the original terminal's output for its actual effect. Reuse the input idempotency key only for retries of exactly the same bytes; never retry an uncertain write blindly. Send eof=true to close stdin. Optional stdin on terminal_execute supplies initial input; without interactive=true it closes after those bytes. Sessions use redirected pipes, not a full-screen PTY. Input to an ended session is rejected. UTF-8 decoding in programs launched through cmd depends on the target program.
+
 For uncertain task outcomes, inspect the result and original state. Never retry non-idempotent work automatically. Cancellation is a request; confirm the final outcome with task_status. Screenshot results arrive as MCP image content from task_status.
 
 Use desktop_view with a completed screenshot or desktop action task ID to display its image in the inline viewer. A queued screenshot can also populate the viewer when ready. Never claim to have visually analyzed an image unless image context is actually available in the host.

@@ -10,17 +10,31 @@ use std::{
     time::Duration,
 };
 use sysinfo::{Disks, Networks, System, Users};
-use tokio::{io::AsyncReadExt, process::Command};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::Command,
+};
 
-pub async fn execute(
-    p: &Policy,
-    action: &str,
-    a: Value,
-    cancel: Arc<AtomicBool>,
-    seconds: u64,
-    output: Option<Output>,
-    state: &std::path::Path,
-) -> Result<Value> {
+pub struct Context<'a> {
+    pub cancel: Arc<AtomicBool>,
+    pub seconds: u64,
+    pub output: Option<Output>,
+    pub state: &'a std::path::Path,
+    pub owner: &'a str,
+    pub task_id: &'a str,
+    pub sessions: &'a crate::terminal_input::Sessions,
+}
+
+pub async fn execute(p: &Policy, action: &str, a: Value, context: Context<'_>) -> Result<Value> {
+    let Context {
+        cancel,
+        seconds,
+        output,
+        state,
+        owner,
+        task_id,
+        sessions,
+    } = context;
     match action {
         "file_batch" | "file_undo" => {
             let (p, state, undo) = (p.clone(), state.to_owned(), action == "file_undo");
@@ -57,7 +71,18 @@ pub async fn execute(
             let (p, state) = (p.clone(), state.to_owned());
             tokio::task::spawn_blocking(move || crate::recovery::trash(&p, &state, &a)).await?
         }
-        "terminal_execute" => terminal_with_output(p, &a, cancel, seconds, output).await,
+        "terminal_execute" => {
+            terminal_with_output(
+                p,
+                &a,
+                cancel,
+                seconds,
+                output,
+                Some((sessions, owner, task_id)),
+            )
+            .await
+        }
+        "terminal_input" => sessions.send(owner, &a).await,
         "application_launch" => {
             let path = p.application(
                 a["path"]
@@ -298,7 +323,7 @@ pub async fn terminal(
     cancel: Arc<AtomicBool>,
     seconds: u64,
 ) -> Result<Value> {
-    terminal_with_output(p, a, cancel, seconds, None).await
+    terminal_with_output(p, a, cancel, seconds, None, None).await
 }
 pub async fn terminal_with_output(
     p: &Policy,
@@ -306,7 +331,18 @@ pub async fn terminal_with_output(
     cancel: Arc<AtomicBool>,
     seconds: u64,
     output: Option<Output>,
+    session: Option<(&crate::terminal_input::Sessions, &str, &str)>,
 ) -> Result<Value> {
+    let interactive = a["interactive"].as_bool().unwrap_or(false);
+    let initial = a["stdin"].as_str();
+    ensure!(
+        initial.is_none_or(|text| text.len() <= 16384),
+        "Initial stdin size limit"
+    );
+    ensure!(
+        !interactive || session.is_some(),
+        "Interactive terminal context is required"
+    );
     let cwd = p.path(
         a["cwd"]
             .as_str()
@@ -332,17 +368,15 @@ pub async fn terminal_with_output(
             let mut c = Command::new(executable);
             #[cfg(windows)]
             let script = format!(
-                "Import-Module -Name (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop\n{text}"
+                "[Console]::InputEncoding=[Text.UTF8Encoding]::new($false);[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Import-Module -Name (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop\n{text}"
             );
             #[cfg(not(windows))]
             let script = text.to_owned();
-            c.args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ]);
+            c.args(["-NoLogo", "-NoProfile"]);
+            if !interactive {
+                c.arg("-NonInteractive");
+            }
+            c.args(["-Command", &script]);
             c
         }
         "cmd" => {
@@ -403,7 +437,11 @@ pub async fn terminal_with_output(
     }
     command
         .current_dir(cwd)
-        .stdin(Stdio::null())
+        .stdin(if interactive || initial.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -446,6 +484,32 @@ pub async fn terminal_with_output(
         "stderr",
         output.clone(),
     ));
+    let mut stdin = child.stdin.take();
+    if let Some(initial) = initial {
+        let input = stdin
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Missing stdin"))?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            input.write_all(initial.as_bytes()).await?;
+            input.flush().await
+        })
+        .await??;
+    }
+    let _input = if interactive {
+        let (sessions, owner, task_id) = session.unwrap();
+        Some(
+            sessions.attach(
+                owner,
+                task_id,
+                stdin
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("Missing interactive stdin"))?,
+            )?,
+        )
+    } else {
+        None
+    };
+    drop(stdin);
     let end = tokio::time::Instant::now() + Duration::from_secs(seconds);
     let status = loop {
         if cancel.load(Ordering::SeqCst) || tokio::time::Instant::now() >= end {
@@ -470,13 +534,89 @@ pub async fn terminal_with_output(
     let (stdout, out_truncated) = out.await??;
     let (stderr, err_truncated) = err.await??;
     Ok(
-        json!({"exit_code":status.code(),"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"output_truncated":out_truncated||err_truncated,"streaming":output.is_some(),"output_last_sequence":output.map(|o|o.sequence.load(Ordering::SeqCst).min(512))}),
+        json!({"exit_code":status.code(),"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"output_truncated":out_truncated||err_truncated,"streaming":output.is_some(),"interactive":interactive,"stdin_mode":if interactive||initial.is_some(){"pipe"}else{"closed"},"output_last_sequence":output.map(|o|o.sequence.load(Ordering::SeqCst).min(512))}),
     )
 }
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use anyhow::Context;
+    #[tokio::test]
+    async fn interactive_stdin_is_owned_streamed_and_closed_with_eof() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir(root.path().join("output"))?;
+        let policy = Policy {
+            roots: vec![root.path().to_path_buf()],
+            protected_paths: vec![],
+            applications: vec![],
+            allow_all_applications: false,
+            allow_modify: true,
+            allow_screenshots: false,
+            ask_before_sensitive: false,
+        };
+        let sessions = crate::terminal_input::Sessions::default();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        let output = Output {
+            state: root.path().to_owned(),
+            task_id: "stdin-fixture".into(),
+            sender,
+            sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        };
+        let child_sessions = sessions.clone();
+        let cwd = root.path().to_owned();
+        let child = tokio::spawn(async move {
+            terminal_with_output(&policy,&json!({"cwd":cwd,"interactive":true,"command":"[Console]::WriteLine('READY');while(($line=[Console]::ReadLine()) -ne $null){[Console]::WriteLine('ECHO:'+$line)};[Console]::WriteLine('EOF_DONE')"}),Arc::new(AtomicBool::new(false)),10,Some(output),Some((&child_sessions,"alice","stdin-fixture"))).await
+        });
+        let ready = tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await?
+            .context("Missing ready output")?;
+        ensure!(ready["text"].as_str().unwrap_or_default().contains("READY"));
+        let input = json!({"target_task_id":"stdin-fixture","text":"Halo 世界\n"});
+        ensure!(sessions.send("mallory", &input).await.is_err());
+        let receipt = sessions.send("alice", &input).await?;
+        ensure!(receipt["input_sent"] == true);
+        let echo = tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await?
+            .context("Missing echo")?;
+        ensure!(
+            echo["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("ECHO:Halo 世界")
+        );
+        ensure!(
+            sessions
+                .send(
+                    "alice",
+                    &json!({"target_task_id":"stdin-fixture","eof":true})
+                )
+                .await?["stdin_closed"]
+                == true
+        );
+        let result = child.await??;
+        ensure!(result["exit_code"] == 0 && result["interactive"] == true);
+        ensure!(
+            result["stdout"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("EOF_DONE")
+        );
+        ensure!(sessions.send("alice", &input).await.is_err());
+        let initial = terminal(&Policy {roots:vec![root.path().to_path_buf()],protected_paths:vec![],applications:vec![],allow_all_applications:false,allow_modify:true,allow_screenshots:false,ask_before_sensitive:false}, &json!({"cwd":root.path(),"command":"[Console]::WriteLine([Console]::ReadLine());[Console]::WriteLine([Console]::ReadLine() -eq $null)","stdin":"Initial stdin\n"}), Arc::new(AtomicBool::new(false)),10).await?;
+        ensure!(
+            initial["stdout"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Initial stdin")
+        );
+        ensure!(
+            initial["stdout"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("True")
+        );
+        Ok(())
+    }
     #[tokio::test]
     async fn suspended_child_cannot_run_before_job_assignment() -> Result<()> {
         let dir = tempfile::tempdir()?;

@@ -10,4 +10,6 @@ Instalasi baru memakai persetujuan lokal per operasi dan allowlist. Pemilik dapa
 
 Screenshot tersedia melalui `desktop_screenshot` dan `desktop_view`. Pada klien yang hanya meneruskan hasil terstruktur, instruksi plugin meneruskan `result.image_data` ke mekanisme `image()` agar AI menerima konteks gambar. Klik dan drag mengikuti tombol utama Windows, termasuk ketika tombol mouse tertukar.
 
+Terminal mendukung empat task bersamaan. `terminal_execute` dengan `interactive=true` membuka stdin pipe; gunakan `terminal_input` dengan `target_task_id` untuk mengirim teks dan EOF. Baca output langsung melalui `task_output`. Gunakan `task_cancel` pada ID terminal untuk menutup sesi dan proses anaknya. Durasi task maksimal 600 detik; program yang membutuhkan PTY belum didukung.
+
 Metadata rilis memakai tanda tangan Ed25519 dan checksum SHA-256. Executable belum ditandatangani Authenticode.

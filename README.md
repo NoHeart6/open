@@ -6,7 +6,7 @@ ChatGPT → MCP server TypeScript → gateway Go → agent Rust → Windows.
 
 ## Status saat ini
 
-Agent Windows dan plugin v0.2.7 sudah terpasang; server MCP produksi sudah diperbarui. Fokus UI Automation, isi teks, invoke, select, pengetikan, klik, drag, scroll dan `Get-FileHash` lulus pengujian pada agent terpasang. Screenshot langsung mengembalikan gambar MCP serta JPEG pada `result.image_data` untuk klien yang hanya meneruskan hasil terstruktur. Bukti dan batas pengujian ada di `docs/USABILITY_FIX_2026-10-15.md`. Akses seluruh profil, semua aplikasi dan izin tetap yang diaktifkan pemilik masih tersimpan. Pada 15 Oktober 2026, pengguna mengonfirmasi AI di ChatGPT biasa dapat melihat dan menjelaskan screenshot bawaan setelah penerusan `result.image_data` melalui `image()`.
+Agent Windows dan plugin v0.2.8 sudah terpasang; gateway dan server MCP produksi sudah diperbarui. Dua terminal berjalan bersamaan, terminal kedua tetap berfungsi saat server panjang aktif, dan tool baru `terminal_input` mengirim stdin serta EOF ke sesi interaktif. MCP menyediakan 32 tools. Bukti dan batas terminal ada di `docs/TERMINAL_FIX_2026-10-15.md`. Fokus UI Automation, isi teks, invoke, select, pengetikan, klik, drag, scroll dan `Get-FileHash` sebelumnya lulus pengujian pada agent terpasang (`docs/USABILITY_FIX_2026-10-15.md`). Screenshot langsung mengembalikan gambar MCP serta JPEG pada `result.image_data`; jalur tersebut kembali lolos uji pengiriman pada v0.2.8. Akses seluruh profil, semua aplikasi dan izin tetap yang diaktifkan pemilik masih tersimpan. Pada 15 Oktober 2026, pengguna mengonfirmasi AI di ChatGPT biasa dapat melihat dan menjelaskan screenshot bawaan v0.2.7 melalui `image()`.
 
 ## Struktur
 
@@ -49,6 +49,7 @@ Pilih OAuth, login pada halaman OpenCommander dan tinjau persetujuan. Setelah te
 .\scripts\diagnose-chatgpt-integration.ps1 -AllApplications
 .\scripts\diagnose-chatgpt-integration.ps1 -Usability
 .\scripts\diagnose-chatgpt-integration.ps1 -Screenshot
+.\scripts\diagnose-chatgpt-integration.ps1 -Terminal
 ```
 
 Diagnosis produksi menggunakan kredensial lokal terenkripsi yang telah diprovisikan; jangan menambahkan kredensial ke source. Mode `-ProfileAccess` membuat fixture sementara pada profil pengguna yang sudah diizinkan, lalu membersihkannya.
@@ -59,6 +60,8 @@ Rust: `cargo test --locked` dan `cargo clippy --locked --all-targets -- -D warni
 
 Mode `-Usability` memverifikasi efek pada jendela fixture sementara, termasuk teks yang diketik, penghitung klik dan viewport setelah scroll. Biarkan mouse saat pengujian berlangsung agar input manual tidak bercampur. Mode `-Screenshot` membaca screenshot tanpa mengoperasikan aplikasi dan memeriksa gambar yang diterima pada panggilan asli, `task_status` dan `desktop_view`. Screenshot privat dan Base64 tidak ditulis ke laporan diagnosis.
 
-Paket Windows terbaru: `releases/windows/OpenCommander-Windows-0.2.7.zip`. Ekstrak lalu jalankan installer; gunakan `--upgrade` untuk instalasi yang sudah ada. Detail ada di `docs/INSTALL_WINDOWS.md`. Paket dapat dibuat ulang dengan `scripts/package.ps1` setelah build berhasil.
+Mode `-Terminal` menguji dua perintah yang benar-benar overlap, perintah kedua saat server masih aktif, stdin Unicode, idempotensi input, EOF ketika keempat slot terisi, input awal dan cleanup sesi. Terminal memakai stdin pipe; program yang memerlukan PTY atau terminal layar penuh belum didukung. Batas durasi task tetap 600 detik.
+
+Paket Windows terbaru: `releases/windows/OpenCommander-Windows-0.2.8.zip`. Ekstrak lalu jalankan installer; gunakan `--upgrade` untuk instalasi yang sudah ada. Detail ada di `docs/INSTALL_WINDOWS.md`. Paket dapat dibuat ulang dengan `scripts/package.ps1` setelah build berhasil.
 
 Bukti pengujian berada di `artifacts/`; runtime, log, backup dan kredensial lokal dikecualikan dari Git dan ZIP plugin. Metadata rilis memakai Ed25519; executable belum ditandatangani Authenticode.

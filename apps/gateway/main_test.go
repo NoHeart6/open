@@ -170,6 +170,49 @@ func TestQueuedCancellation(t *testing.T) {
 		t.Fatal(b)
 	}
 }
+func TestTerminalInputOwnershipScopeAndIdempotency(t *testing.T) {
+	s, h := fixture(t)
+	device, _ := pair(t, s, h)
+	body := taskBody(device, "terminal-target")
+	body["action"] = "terminal_execute"
+	body["args"] = map[string]any{"command": "fixture", "interactive": true}
+	_, target := request(t, s, h, "POST", "/api/tasks", "alice", body)
+	input := taskBody(device, "terminal-input-request")
+	input["action"] = "terminal_input"
+	input["args"] = map[string]any{"target_task_id": target["task_id"], "text": "hello\n"}
+	code, first := request(t, s, h, "POST", "/api/tasks", "alice", input)
+	if code != 202 {
+		t.Fatal(code, first)
+	}
+	code, repeated := request(t, s, h, "POST", "/api/tasks", "alice", input)
+	if code != 202 || repeated["task_id"] != first["task_id"] {
+		t.Fatal(code, repeated)
+	}
+	if code, _ := request(t, s, h, "POST", "/api/tasks", "mallory", input); code != 404 {
+		t.Fatal(code)
+	}
+	input["idempotency_key"] = "terminal-other-target"
+	input["args"] = map[string]any{"target_task_id": "missing-terminal", "text": "hello\n"}
+	if code, _ := request(t, s, h, "POST", "/api/tasks", "alice", input); code != 404 {
+		t.Fatal(code)
+	}
+	input["args"] = map[string]any{"target_task_id": target["task_id"], "text": ""}
+	if code, _ := request(t, s, h, "POST", "/api/tasks", "alice", input); code != 400 {
+		t.Fatal(code)
+	}
+	input["args"] = map[string]any{"target_task_id": target["task_id"], "eof": true}
+	b, _ := json.Marshal(input)
+	r, _ := http.NewRequest("POST", h.URL+"/api/tasks", bytes.NewReader(b))
+	r.Header.Set("Authorization", "Bearer "+identity(t, s, "alice", "computer:read"))
+	response, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 403 {
+		t.Fatal(response.StatusCode)
+	}
+}
 func TestRestartDoesNotReplay(t *testing.T) {
 	s, h := fixture(t)
 	device, _ := pair(t, s, h)

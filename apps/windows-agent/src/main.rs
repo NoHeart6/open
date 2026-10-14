@@ -11,6 +11,7 @@ mod policy;
 mod recovery;
 mod storage;
 mod system;
+mod terminal_input;
 mod ui;
 mod updater;
 
@@ -111,6 +112,7 @@ struct Record {
     acknowledged_at: u64,
 }
 type Cancellations = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
+const MAX_CONCURRENT_TERMINALS: usize = 4;
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -299,11 +301,26 @@ fn verify_task(message: &Value, creds: &Credentials) -> Result<Task> {
     );
     Ok(task)
 }
+#[derive(Clone)]
+struct TaskScheduler {
+    desktop: Arc<Semaphore>,
+    terminals: Arc<Semaphore>,
+    sessions: terminal_input::Sessions,
+}
+impl Default for TaskScheduler {
+    fn default() -> Self {
+        Self {
+            desktop: Arc::new(Semaphore::new(1)),
+            terminals: Arc::new(Semaphore::new(MAX_CONCURRENT_TERMINALS)),
+            sessions: terminal_input::Sessions::default(),
+        }
+    }
+}
 struct TaskRuntime {
     state: PathBuf,
     sender: mpsc::Sender<Value>,
     cancels: Cancellations,
-    semaphore: Arc<Semaphore>,
+    scheduler: TaskScheduler,
     control: Arc<ui::Control>,
     streaming: bool,
 }
@@ -312,7 +329,7 @@ async fn run_task(t: Task, flag: Arc<AtomicBool>, runtime: TaskRuntime) -> Resul
         state,
         sender,
         cancels,
-        semaphore,
+        scheduler,
         control,
         streaming,
     } = runtime;
@@ -344,8 +361,10 @@ async fn run_task(t: Task, flag: Arc<AtomicBool>, runtime: TaskRuntime) -> Resul
     let result: Result<Value> = async {
         let remaining = t.deadline.saturating_sub(now());
         ensure!(remaining > 0, "Deadline expired");
-        let _permit =
-            tokio::time::timeout(Duration::from_secs(remaining), semaphore.acquire()).await??;
+        let lane = if t.action == "terminal_execute" { &scheduler.terminals } else { &scheduler.desktop };
+        let _permit = if t.action == "terminal_input" { None } else {
+            Some(tokio::time::timeout(Duration::from_secs(remaining), lane.acquire()).await.context("Execution slot unavailable before task deadline")??)
+        };
         ensure!(
             !flag.load(Ordering::SeqCst) && now() < t.deadline && control.mode.load(Ordering::SeqCst) == 0,
             "Task cancelled or expired before execution"
@@ -387,15 +406,16 @@ async fn run_task(t: Task, flag: Arc<AtomicBool>, runtime: TaskRuntime) -> Resul
             &current_cfg.policy,
             &t.action,
             t.args.clone(),
-            flag.clone(),
-            t.deadline.saturating_sub(now()),
-            streaming.then(|| execution::Output { state:state.clone(), task_id:t.task_id.clone(), sender:sender.clone(), sequence:Arc::new(std::sync::atomic::AtomicU64::new(0)) }),
-            &state,
+            execution::Context {
+                cancel:flag.clone(), seconds:t.deadline.saturating_sub(now()),
+                output:streaming.then(|| execution::Output { state:state.clone(), task_id:t.task_id.clone(), sender:sender.clone(), sequence:Arc::new(std::sync::atomic::AtomicU64::new(0)) }),
+                state:&state,owner:&t.owner,task_id:&t.task_id,sessions:&scheduler.sessions,
+            },
         )
         .await?;
         if t.action == "system_info" {
             output["agent_version"] = json!(env!("CARGO_PKG_VERSION"));
-            output["workspace"] = json!({"user_profile":std::env::var("USERPROFILE").ok(),"approved_roots":current_cfg.policy.roots,"permission_modify":current_cfg.policy.allow_modify,"permission_screenshots":current_cfg.policy.allow_screenshots,"ask_before_sensitive":current_cfg.policy.ask_before_sensitive,"allow_all_applications":current_cfg.policy.allow_all_applications,"approved_applications":current_cfg.policy.applications,"internal_storage_protected":true});
+            output["workspace"] = json!({"user_profile":std::env::var("USERPROFILE").ok(),"approved_roots":current_cfg.policy.roots,"permission_modify":current_cfg.policy.allow_modify,"permission_screenshots":current_cfg.policy.allow_screenshots,"ask_before_sensitive":current_cfg.policy.ask_before_sensitive,"allow_all_applications":current_cfg.policy.allow_all_applications,"approved_applications":current_cfg.policy.applications,"internal_storage_protected":true,"max_concurrent_terminals":MAX_CONCURRENT_TERMINALS,"terminal_stdin":true});
         }
         Ok(output)
     }
@@ -447,7 +467,7 @@ async fn connect(
     cfg: &Config,
     creds: &Credentials,
     cancels: Cancellations,
-    semaphore: Arc<Semaphore>,
+    scheduler: TaskScheduler,
     control: Arc<ui::Control>,
 ) -> Result<()> {
     let mut url = validate_gateway(&cfg.gateway, cfg.dev)?;
@@ -541,8 +561,8 @@ async fn connect(
                                 if map.contains_key(&t.task_id){continue}
                                 if map.len()>=16{sender.try_send(json!({"type":"result","task_id":t.task_id,"status":"failed","error":"Local task capacity exceeded","result":null})).ok();continue}
                                 map.insert(t.task_id.clone(),flag.clone());}
-                                let (state,sender,cancels,semaphore,control)=(state.to_path_buf(),sender.clone(),cancels.clone(),semaphore.clone(),control.clone());
-                                tokio::spawn(async move{let id=t.task_id.clone();let cleanup=cancels.clone();let runtime=TaskRuntime{state,sender,cancels,semaphore,control,streaming};if let Err(e)=run_task(t,flag,runtime).await{if let Ok(mut map)=cleanup.lock(){map.remove(&id);}println!("{}",json!({"event":"task_failed","task_id":id,"error":e.to_string()}));}});
+                                let (state,sender,cancels,scheduler,control)=(state.to_path_buf(),sender.clone(),cancels.clone(),scheduler.clone(),control.clone());
+                                tokio::spawn(async move{let id=t.task_id.clone();let cleanup=cancels.clone();let runtime=TaskRuntime{state,sender,cancels,scheduler,control,streaming};if let Err(e)=run_task(t,flag,runtime).await{if let Ok(mut map)=cleanup.lock(){map.remove(&id);}println!("{}",json!({"event":"task_failed","task_id":id,"error":e.to_string()}));}});
                             },
                             _=>break Err(anyhow::anyhow!("Unexpected gateway message")),
                         }
@@ -817,7 +837,7 @@ async fn run() -> Result<()> {
         return Ok(());
     }
     recover(&state)?;
-    let semaphore = Arc::new(Semaphore::new(1));
+    let scheduler = TaskScheduler::default();
     let mut failures = 0u32;
     loop {
         consume_local_control(&state, &control)?;
@@ -836,7 +856,7 @@ async fn run() -> Result<()> {
             &cfg,
             &creds,
             cancels.clone(),
-            semaphore.clone(),
+            scheduler.clone(),
             control.clone(),
         )
         .await
@@ -880,6 +900,94 @@ async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn terminal_scheduler_does_not_block_a_second_command_behind_a_server() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let state = root.path().join("state");
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(state.join("journal"))?;
+        std::fs::create_dir(&workspace)?;
+        let config = Config {
+            gateway: "http://127.0.0.1:8080".into(),
+            dev: true,
+            policy: policy::Policy {
+                roots: vec![workspace.clone()],
+                protected_paths: vec![],
+                applications: vec![],
+                allow_all_applications: false,
+                allow_modify: true,
+                allow_screenshots: false,
+                ask_before_sensitive: false,
+            },
+        };
+        std::fs::write(state.join("config.json"), serde_json::to_vec(&config)?)?;
+        let marker = workspace.join("ready.txt");
+        let (sender, _receiver) = mpsc::channel(16);
+        let cancels = Arc::new(Mutex::new(HashMap::new()));
+        let scheduler = TaskScheduler::default();
+        let control = Arc::new(ui::Control::default());
+        let runtime = || TaskRuntime {
+            state: state.clone(),
+            sender: sender.clone(),
+            cancels: cancels.clone(),
+            scheduler: scheduler.clone(),
+            control: control.clone(),
+            streaming: false,
+        };
+        let task = |id: &str, command: String, seconds: u64| Task {
+            task_id: id.into(),
+            owner: "alice".into(),
+            device_id: "test-device".into(),
+            action: "terminal_execute".into(),
+            args: json!({"cwd":workspace,"command":command}),
+            status: "dispatched".into(),
+            category: "SENSITIVE".into(),
+            created_at: now(),
+            deadline: now() + seconds,
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let long = tokio::spawn(run_task(
+            task(
+                "long-server",
+                format!(
+                    "[IO.File]::WriteAllText('{}','READY');Start-Sleep -Seconds 10",
+                    marker.to_string_lossy().replace('\'', "''")
+                ),
+                20,
+            ),
+            cancel.clone(),
+            runtime(),
+        ));
+        for _ in 0..100 {
+            if marker.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        ensure!(marker.exists(), "First terminal must have started");
+        let second = run_task(
+            task(
+                "second-terminal",
+                "[Console]::WriteLine('SECOND_DONE')".into(),
+                3,
+            ),
+            Arc::new(AtomicBool::new(false)),
+            runtime(),
+        )
+        .await;
+        let concurrent = !long.is_finished();
+        cancel.store(true, Ordering::SeqCst);
+        long.await??;
+        second?;
+        let record: Record =
+            serde_json::from_slice(&storage::load(&journal_path(&state, "second-terminal")?)?)?;
+        ensure!(
+            concurrent && record.status == "succeeded",
+            "Second command must finish before the server"
+        );
+        Ok(())
+    }
     #[test]
     fn signature_owner_expiry_and_recovery() -> Result<()> {
         let key = SigningKey::from_bytes(&[7; 32]);

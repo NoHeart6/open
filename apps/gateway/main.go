@@ -463,6 +463,22 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request, c *Claims) {
 		fail(w, 404, "device not found")
 		return
 	}
+	if a.Action == "terminal_input" {
+		var input struct {
+			Target string `json:"target_task_id"`
+			Text   string `json:"text"`
+			EOF    bool   `json:"eof"`
+		}
+		if json.Unmarshal(a.Args, &input) != nil || len(input.Target) < 8 || len(input.Target) > 128 || len(input.Text) > 16384 || (input.Text == "" && !input.EOF) {
+			fail(w, 400, "invalid stdin request")
+			return
+		}
+		target, err := s.task(c.Subject, input.Target)
+		if err != nil || target.DeviceID != a.DeviceID || target.Action != "terminal_execute" {
+			fail(w, 404, "owned terminal task not found")
+			return
+		}
+	}
 	fingerprint := digest(a.Action + string(a.Args) + fmt.Sprint(a.Timeout))
 	id := token(18)
 	tx, err := s.db.Begin()
