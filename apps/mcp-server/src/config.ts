@@ -1,4 +1,5 @@
 import {readFileSync} from 'node:fs';
+export const serverVersion=String((JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')) as {version:string}).version);
 export interface Config {
  port:number; host:string; resource:string; issuer:string; jwksUrl:string;
  gateway:string; bridgeKey:string; devKey?:string; dev:boolean;

@@ -39,6 +39,8 @@ https://mcp-production-394c.up.railway.app/mcp
 
 Pilih OAuth, login pada halaman OpenCommander dan tinjau persetujuan. Setelah terhubung, mulai dengan `device_list` dan `system_info`. Password dan token tidak disertakan dalam paket plugin.
 
+Untuk koneksi yang sudah ada, [pilih Refresh pada halaman Plugins](https://developers.openai.com/plugins/deploy/connect-chatgpt) setelah tools atau schema berubah, lalu mulai percakapan baru. MCP v0.2.8 mengiklankan 32 tools, termasuk `terminal_input`; `terminal_execute` menerima `interactive` dan `stdin`. Pengguna sudah mengonfirmasi terminal paralel dan stdout streaming berhasil, tetapi stdin masih terblokir di sesi ChatGPT yang belum menampilkan definisi baru. Eksekusi stdin/EOF melalui klien MCP independen sudah lulus; hasilnya tidak menggantikan pengujian host ChatGPT.
+
 ## Pengembangan dan verifikasi
 
 ```powershell

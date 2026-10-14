@@ -2,7 +2,7 @@ import express from 'express';
 import {createMcpHandler} from '@modelcontextprotocol/server';
 import {toNodeHandler} from '@modelcontextprotocol/node';
 import {authenticator} from './auth.js';
-import {config,type Config} from './config.js';
+import {config,serverVersion,type Config} from './config.js';
 import {server} from './tools.js';
 import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
@@ -17,7 +17,7 @@ export function app(c:Config,record:(event:Record<string,unknown>)=>void=event=>
  a.use(express.json({limit:'256kb'}));
  const authenticate=authenticator(c);
  a.use((_req,res,next)=>{res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');next();});
- a.get('/healthz',(_req,res)=>res.json({status:'ok'}));
+ a.get('/healthz',(_req,res)=>res.json({status:'ok',version:serverVersion}));
  a.use('/releases/windows',express.static(resolve(process.env.OPENCOMMANDER_RELEASE_DIR??'releases/windows'),{index:false,dotfiles:'deny',redirect:false,setHeaders:res=>{res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');}}));
  a.get(['/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/mcp'],(_req,res)=>res.json({resource:c.resource,authorization_servers:[c.issuer],scopes_supported:['computer:read','computer:control'],bearer_methods_supported:['header']}));
  a.post('/mcp',async(req,res)=>{

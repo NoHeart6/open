@@ -1,7 +1,7 @@
 import {McpServer} from '@modelcontextprotocol/server';
 import {z} from 'zod';
 import {assertion,type Identity} from './auth.js';
-import type {Config} from './config.js';
+import {serverVersion,type Config} from './config.js';
 import {desktopViewerHtml,desktopViewerUri,desktopResult} from './desktop-viewer.js';
 
 const path=z.string().min(1).max(2048).describe('Absolute Windows path inside the locally approved root');
@@ -38,7 +38,7 @@ export async function gatewayRequest(c:Config,id:Identity,route:string,method='G
  return data;
 }
 export function server(c:Config,id:Identity,trace?:{requestId:string;record:(event:Record<string,unknown>)=>void}):McpServer{
- const s=new McpServer({name:'opencommander',version:'0.2.0'});
+ const s=new McpServer({name:'opencommander',version:serverVersion});
  s.registerResource('desktop-viewer',desktopViewerUri,{mimeType:'text/html;profile=mcp-app'},async()=>({contents:[{uri:desktopViewerUri,mimeType:'text/html;profile=mcp-app',text:desktopViewerHtml,_meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}},'openai/widgetDescription':'Displays the privately retrieved Windows screenshot and lets its owner save the PNG.','openai/widgetPrefersBorder':true}}]}));
  const register=(name:string,description:string,schema:z.ZodRawShape,read:boolean,run:(args:Record<string,unknown>)=>Promise<Record<string,unknown>>)=>{
   const viewer=name==='desktop_view'||name==='desktop_screenshot';

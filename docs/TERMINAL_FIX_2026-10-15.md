@@ -6,7 +6,7 @@ Agent Windows v0.2.8 sudah terpasang. Gateway dan MCP produksi serta plugin akun
 | --- | --- |
 | Dua terminal berjalan bergantian | PASS: dua task berbeda berjalan pada interval yang overlap. |
 | Terminal kedua gagal saat server panjang aktif | PASS: perintah kedua selesai saat listener server pertama masih aktif. |
-| Stdin interaktif belum tersedia | PASS: stdin Unicode diterima proses, echo dibaca dari output streaming, EOF menutup sesi. |
+| Stdin interaktif belum tersedia | PASS melalui klien MCP independen: stdin Unicode, echo streaming dan EOF. BLOCKED pada sesi ChatGPT pengguna: `terminal_input` dan parameter `interactive` belum muncul. |
 | Multi-monitor | Belum diuji secara fisik; konfigurasi ini memiliki satu monitor. Tes konversi koordinat virtual dengan origin negatif tetap tersedia. |
 | Dialog elevasi UAC | Belum diuji pada konfigurasi ini. Agent tetap menolak operasi desktop pada secure desktop Windows. |
 
@@ -35,13 +35,23 @@ EOF menutup pipe sesudah teks. Task_cancel pada ID terminal menghentikan proses 
 - Input ke terminal yang selesai ditolak; input awal ditutup setelah dikirim. Semua terminal fixture akhirnya succeeded atau cancelled. Journal lokal menunjukkan nol task aktif sesudah pengujian.
 - Pengiriman gambar asli, task_status dan desktop_view tetap menghasilkan JPEG yang sama setelah pembaruan terminal.
 
-Pengujian oleh klien independen ini membuktikan eksekusi Windows melalui endpoint MCP produksi. Pengujian ulang terminal paralel dan stdin di percakapan ChatGPT pengguna diminta; hasil dari host tersebut belum diterima saat catatan ini dibuat.
+Pengujian oleh klien independen ini membuktikan eksekusi Windows melalui endpoint MCP produksi. Pengguna kemudian mengonfirmasi terminal paralel dan streaming stdout PASS di ChatGPT biasa. Stdin/EOF masih BLOCKED karena definisi tool di sesi tersebut belum memuat `terminal_input` atau parameter `interactive`. Status ini berbeda dari hasil eksekusi independen dan belum dapat dianggap lulus di ChatGPT.
+
+## Pembaruan daftar tool ChatGPT
+
+Versi yang dilaporkan saat MCP initialize sebelumnya masih hardcoded `0.2.0`. Server sekarang membaca versi `0.2.8` dari package.json; healthz juga mengembalikan versi tersebut. Tes menguji versi initialize, healthz, keberadaan terminal_input dan schema interactive/stdin. Perubahan nomor versi tidak otomatis menyegarkan action yang sudah disimpan ChatGPT.
+
+Menurut [dokumentasi OpenAI](https://developers.openai.com/plugins/deploy/connect-chatgpt), koneksi MCP kustom yang berubah perlu dibuka pada halaman Plugins dan dipilih **Refresh**. Setelah metadata baru terkonfirmasi, mulai percakapan baru. Membuka percakapan baru sebelum Refresh saja tidak memastikan schema baru tersedia. Periksa bahwa daftar memuat `terminal_input` dan `terminal_execute` menerima `interactive` serta `stdin`. Jika koneksi workspace menampilkan action baru sebagai disabled, pengelola perlu meninjau dan mengaktifkannya sesuai [Action control](https://help.openai.com/en/articles/12584461-creating-custom-mcp-apps-in-chatgpt).
+
+Nama tampilan `open` atau `OpenCommander` tidak menentukan isi schema; endpoint koneksi harus `https://mcp-production-394c.up.railway.app/mcp`. Browser ChatGPT pengguna yang sudah login tidak tersedia dalam sesi kontrol Codex ini, sehingga Refresh pada koneksi pengguna belum dilakukan oleh Codex.
+
+Sesudah deploy metadata versi, 10 tes MCP, lint, typecheck dan build lulus. Diagnosis terautentikasi produksi menghasilkan 17 pemeriksaan PASS: initialize melaporkan versi 0.2.8, tools/list memuat 32 tools, interactive bertipe boolean, stdin bertipe string dan terminal_input tersedia. Bukti tersanitasi ada di `artifacts/chatgpt-integration-diagnostics.json`. Pemeriksaan ini memakai klien independen, bukan sesi ChatGPT pengguna.
 
 Laporan lokal tersanitasi: `artifacts/terminal-before-results.json` dan `artifacts/terminal-results.json`. Jalankan ulang dengan `scripts/diagnose-chatgpt-integration.ps1 -Terminal`; tambahkan -Screenshot untuk regresi pengiriman gambar. Output fixture dipakai untuk assertion, sedangkan screenshot dan Base64 tidak disimpan dalam laporan.
 
 ## Distribusi
 
-Gateway deployment: `aed5b479-a9ce-42d7-a145-9c98931a5cf2`. MCP deployment: `8e9a86c2-eab6-4c6a-9b7a-142a652cef4b`. Keduanya SUCCESS.
+Gateway deployment: `aed5b479-a9ce-42d7-a145-9c98931a5cf2`. MCP deployment fitur terminal: `8e9a86c2-eab6-4c6a-9b7a-142a652cef4b`; pembaruan metadata versi: `83988a94-74e3-4c31-af34-02556ba74646`. Semuanya SUCCESS.
 
 Plugin OpenCommander v0.2.8 tetap memiliki ID `plugins_6acf7aa2e4788191a6c8ab77b2f36fb9`. Release `pluginrel_6acfea3240008191b3ff80ce308c4779` dibaca kembali; identitas, interface/default prompt, OAuth dan audience tidak berubah. Skill menambahkan cara menggunakan terminal paralel dan stdin.
 
