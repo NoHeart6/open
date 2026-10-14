@@ -50,7 +50,7 @@ pub fn execute(a: &Value, write: bool) -> Result<Value> {
     if write && op == "focus" && id.is_none() && name.is_none() && path.is_none() {
         crate::desktop::interact(&json!({"op":"focus","hwnd":hwnd}))?;
         return Ok(
-            json!({"operation":"focus","target":"window","hwnd":hwnd,"verified":true,"verification_note":"Window foreground HWND was read back"}),
+            json!({"operation":"focus","target":"window","hwnd":hwnd,"input_sent":true,"verified":true,"verification_state":"verified","verification_note":"Window foreground HWND was read back"}),
         );
     }
     struct Apartment;
@@ -157,7 +157,7 @@ pub fn execute(a: &Value, write: bool) -> Result<Value> {
                 crate::desktop::interact(&json!({"op":"focus","hwnd":hwnd}))?;
                 if automation.CompareElements(&root, &element)?.as_bool() {
                     return Ok(
-                        json!({"operation":op,"target":"window","hwnd":hwnd,"before":before,"verified":true,"verification_note":"Window foreground HWND was read back"}),
+                        json!({"operation":op,"target":"window","hwnd":hwnd,"before":before,"input_sent":true,"verified":true,"verification_state":"verified","verification_note":"Window foreground HWND was read back"}),
                     );
                 }
                 ensure!(
@@ -182,7 +182,7 @@ pub fn execute(a: &Value, write: bool) -> Result<Value> {
                 let value: IUIAutomationValuePattern =
                     element.GetCurrentPatternAs(UIA_ValuePatternId)?;
                 value.SetValue(&BSTR::from(text))?;
-                value.CurrentValue()? == text
+                wait_for(|| Ok(value.CurrentValue()? == text))?
             }
             "invoke" => {
                 let invoke: IUIAutomationInvokePattern =
@@ -194,18 +194,62 @@ pub fn execute(a: &Value, write: bool) -> Result<Value> {
                 let selection: IUIAutomationSelectionItemPattern =
                     element.GetCurrentPatternAs(UIA_SelectionItemPatternId)?;
                 selection.Select()?;
-                selection.CurrentIsSelected()?.as_bool()
+                wait_for(|| Ok(selection.CurrentIsSelected()?.as_bool()))?
             }
             _ => anyhow::bail!("Unsupported UI Automation operation"),
         };
-        if op != "invoke" {
-            ensure!(verified, "UI Automation postcondition did not match");
-        }
         let after = describe(&element, path.as_deref());
         Ok(
-            json!({"operation":op,"before":before,"after":after,"verified":verified,"verification_note":if op=="invoke"{"Invocation was sent; inspect application state to verify the requested effect"}else{"Requested property was read back"}}),
+            json!({"operation":op,"before":before,"after":after,"input_sent":true,"verified":verified,"verification_state":if verified{"verified"}else if op=="invoke"{"sent"}else{"unverified"},"verification_note":if op=="invoke"{"Invocation was sent; use the attached screenshot or inspect application state to verify the requested effect"}else if verified{"Requested property was read back"}else{"The provider accepted the action, but its postcondition was not observed within the verification deadline. Inspect before retrying."}}),
         )
     }
+}
+#[cfg(windows)]
+fn wait_for(mut read: impl FnMut() -> Result<bool>) -> Result<bool> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(750);
+    loop {
+        if read().unwrap_or(false) {
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+#[cfg(windows)]
+pub fn focused() -> Result<Value> {
+    use windows::Win32::{System::Com::*, UI::Accessibility::*};
+    crate::desktop::available()?;
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+        struct Apartment;
+        impl Drop for Apartment {
+            fn drop(&mut self) {
+                unsafe {
+                    CoUninitialize();
+                }
+            }
+        }
+        let _apartment = Apartment;
+        let automation: IUIAutomation =
+            CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+        use windows::core::Interface;
+        if let Ok(v2) = automation.cast::<IUIAutomation2>() {
+            v2.SetConnectionTimeout(1500)?;
+            v2.SetTransactionTimeout(1500)?;
+        }
+        let element = automation.GetFocusedElement()?;
+        ensure!(
+            element.CurrentProcessId()? as u32 != std::process::id(),
+            "OpenCommander controls are protected"
+        );
+        Ok(describe(&element, None))
+    }
+}
+#[cfg(not(windows))]
+pub fn focused() -> Result<Value> {
+    anyhow::bail!("UI Automation requires Windows")
 }
 #[cfg(windows)]
 unsafe fn collect(
@@ -272,13 +316,20 @@ unsafe fn describe(
                 .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
                 .ok()
                 .and_then(|p| p.CurrentValue().ok())
+                .or_else(|| {
+                    element
+                        .GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+                        .ok()
+                        .and_then(|p| p.DocumentRange().ok())
+                        .and_then(|range| range.GetText(4096).ok())
+                })
                 .map(|s| s.to_string().chars().take(4096).collect::<String>())
         };
         let rectangle = element
             .CurrentBoundingRectangle()
             .ok()
             .map(|r| json!({"x":r.left,"y":r.top,"width":r.right-r.left,"height":r.bottom-r.top}));
-        json!({"depth":path.map(|p|p.len()),"element_path":path,"name":element.CurrentName().ok().map(|s|s.to_string()),"automation_id":element.CurrentAutomationId().ok().map(|s|s.to_string()),"control_type":element.CurrentControlType().ok().map(|s|s.0),"focused":element.CurrentHasKeyboardFocus().ok().map(|s|s.as_bool()),"focusable":element.CurrentIsKeyboardFocusable().ok().map(|s|s.as_bool()),"enabled":element.CurrentIsEnabled().ok().map(|s|s.as_bool()),"password":password,"value":value,"bounds":rectangle})
+        json!({"depth":path.map(|p|p.len()),"element_path":path,"name":element.CurrentName().ok().map(|s|s.to_string()),"automation_id":element.CurrentAutomationId().ok().map(|s|s.to_string()),"control_type":element.CurrentControlType().ok().map(|s|s.0),"focused":element.CurrentHasKeyboardFocus().ok().map(|s|s.as_bool()),"focusable":element.CurrentIsKeyboardFocusable().ok().map(|s|s.as_bool()),"enabled":element.CurrentIsEnabled().ok().map(|s|s.as_bool()),"offscreen":element.CurrentIsOffscreen().ok().map(|s|s.as_bool()),"password":password,"value":value,"selected":element.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).ok().and_then(|pattern|pattern.CurrentIsSelected().ok()).map(|selected|selected.as_bool()),"bounds":rectangle})
     }
 }
 #[cfg(not(windows))]

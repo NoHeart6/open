@@ -1,6 +1,15 @@
 use anyhow::{Result, bail, ensure};
 use serde_json::{Value, json};
 
+#[cfg(any(windows, test))]
+fn absolute_axis(pixel: i64, origin: i64, extent: i64) -> Result<i32> {
+    ensure!(
+        extent > 0 && pixel >= origin && pixel < origin + extent,
+        "Pointer outside virtual screen"
+    );
+    Ok((((pixel - origin) * 65_536 + 32_768) / extent).min(65_535) as i32)
+}
+
 fn bounded_png(img: image::DynamicImage) -> Result<(Vec<u8>, u32, u32)> {
     use image::{
         ImageEncoder,
@@ -19,7 +28,24 @@ fn bounded_png(img: image::DynamicImage) -> Result<(Vec<u8>, u32, u32)> {
                 resized.height(),
                 image::ExtendedColorType::Rgb8,
             )?;
-        if output.len() <= 700_000 {
+        if output.len() <= 500_000 {
+            return Ok((output, resized.width(), resized.height()));
+        }
+        width = (resized.width() * 3 / 4).max(1);
+        height = (resized.height() * 3 / 4).max(1);
+    }
+}
+
+fn bounded_jpeg(img: &image::DynamicImage) -> Result<(Vec<u8>, u32, u32)> {
+    let original = img.to_rgb8();
+    let mut width = original.width().min(960);
+    let mut height = original.height().min(600);
+    loop {
+        let resized = image::imageops::thumbnail(&original, width, height);
+        let mut output = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 70)
+            .encode_image(&resized)?;
+        if output.len() <= 100_000 {
             return Ok((output, resized.width(), resized.height()));
         }
         width = (resized.width() * 3 / 4).max(1);
@@ -65,7 +91,10 @@ mod native {
             let active = size >= 4 && !buffer.is_null() && *(buffer as *const i32) == WTSActive;
             WTSFreeMemory(buffer.cast());
             ensure!(active, "Windows session is disconnected or unavailable");
-            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            ensure!(
+                !SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_null(),
+                "Cannot establish physical desktop coordinate context"
+            );
             let d = OpenInputDesktop(0, 0, DESKTOP_READOBJECTS);
             ensure!(!d.is_null(), "Interactive desktop unavailable or locked");
             let mut name = [0u16; 128];
@@ -231,10 +260,11 @@ mod native {
         }
         let img = image::RgbaImage::from_raw(width as u32, height as u32, pixels)
             .ok_or_else(|| anyhow::anyhow!("Invalid bitmap"))?;
-        let (output, image_width, image_height) =
-            bounded_png(image::DynamicImage::ImageRgba8(img))?;
+        let img = image::DynamicImage::ImageRgba8(img);
+        let (jpeg, jpeg_image_width, jpeg_image_height) = bounded_jpeg(&img)?;
+        let (output, image_width, image_height) = bounded_png(img)?;
         Ok(
-            json!({"png_base64":STANDARD.encode(output),"virtual_screen":dimensions,"image_width":image_width,"image_height":image_height,"coordinates":"Use virtual_screen physical coordinates, not downscaled image pixels"}),
+            json!({"png_base64":STANDARD.encode(output),"jpeg_base64":STANDARD.encode(jpeg),"jpeg_image_width":jpeg_image_width,"jpeg_image_height":jpeg_image_height,"virtual_screen":dimensions,"image_width":image_width,"image_height":image_height,"coordinates":"Use virtual_screen physical coordinates, not downscaled image pixels"}),
         )
     }
     fn send(inputs: &[INPUT]) -> Result<()> {
@@ -265,6 +295,36 @@ mod native {
             },
         }
     }
+    fn move_pointer(x: i64, y: i64) -> Result<()> {
+        let v = screen();
+        let mut input = mouse(
+            MOUSEEVENTF_MOVE
+                | MOUSEEVENTF_ABSOLUTE
+                | MOUSEEVENTF_VIRTUALDESK
+                | MOUSEEVENTF_MOVE_NOCOALESCE,
+            0,
+        );
+        input.Anonymous.mi.dx =
+            absolute_axis(x, v["x"].as_i64().unwrap(), v["width"].as_i64().unwrap())?;
+        input.Anonymous.mi.dy =
+            absolute_axis(y, v["y"].as_i64().unwrap(), v["height"].as_i64().unwrap())?;
+        send(&[input])?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+        loop {
+            let mut point = POINT::default();
+            if unsafe { GetPhysicalCursorPos(&mut point) } != 0
+                && i64::from(point.x) == x
+                && i64::from(point.y) == y
+            {
+                return Ok(());
+            }
+            ensure!(
+                std::time::Instant::now() < deadline,
+                "Pointer did not reach requested location"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
     fn key(code: u16, scan: u16, flags: u32) -> INPUT {
         INPUT {
             r#type: INPUT_KEYBOARD,
@@ -281,6 +341,22 @@ mod native {
     }
     pub fn interact(a: &Value) -> Result<Value> {
         available()?;
+        let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+        let (primary_down, primary_up, secondary_down, secondary_up) = if swapped {
+            (
+                MOUSEEVENTF_RIGHTDOWN,
+                MOUSEEVENTF_RIGHTUP,
+                MOUSEEVENTF_LEFTDOWN,
+                MOUSEEVENTF_LEFTUP,
+            )
+        } else {
+            (
+                MOUSEEVENTF_LEFTDOWN,
+                MOUSEEVENTF_LEFTUP,
+                MOUSEEVENTF_RIGHTDOWN,
+                MOUSEEVENTF_RIGHTUP,
+            )
+        };
         let op = a["op"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing operation"))?;
@@ -339,12 +415,7 @@ mod native {
                     && y < top + v["height"].as_i64().unwrap(),
                 "Pointer outside virtual screen"
             );
-            unsafe {
-                ensure!(
-                    SetCursorPos(x as i32, y as i32) != 0,
-                    "Mouse movement failed"
-                );
-            }
+            move_pointer(x, y)?;
         }
         match op {
             "drag" => {
@@ -366,7 +437,7 @@ mod native {
                 );
                 let mut start = POINT::default();
                 unsafe {
-                    GetCursorPos(&mut start);
+                    GetPhysicalCursorPos(&mut start);
                     let hit = WindowFromPoint(POINT {
                         x: x as i32,
                         y: y as i32,
@@ -378,24 +449,19 @@ mod native {
                         "Cannot drag onto OpenCommander controls"
                     );
                 }
-                struct ReleaseButton;
+                struct ReleaseButton(u32);
                 impl Drop for ReleaseButton {
                     fn drop(&mut self) {
-                        let _ = send(&[mouse(MOUSEEVENTF_LEFTUP, 0)]);
+                        let _ = send(&[mouse(self.0, 0)]);
                     }
                 }
-                send(&[mouse(MOUSEEVENTF_LEFTDOWN, 0)])?;
-                let release = ReleaseButton;
+                send(&[mouse(primary_down, 0)])?;
+                let release = ReleaseButton(primary_up);
                 for step in 1..=32 {
-                    unsafe {
-                        ensure!(
-                            SetCursorPos(
-                                (i64::from(start.x) + (x - i64::from(start.x)) * step / 32) as i32,
-                                (i64::from(start.y) + (y - i64::from(start.y)) * step / 32) as i32
-                            ) != 0,
-                            "Drag movement failed"
-                        );
-                    }
+                    move_pointer(
+                        i64::from(start.x) + (x - i64::from(start.x)) * step / 32,
+                        i64::from(start.y) + (y - i64::from(start.y)) * step / 32,
+                    )?;
                     std::thread::sleep(std::time::Duration::from_millis(15));
                 }
                 drop(release);
@@ -430,17 +496,14 @@ mod native {
                 a.get("x").is_some() && a.get("y").is_some(),
                 "Move requires x and y"
             ),
-            "click" => send(&[mouse(MOUSEEVENTF_LEFTDOWN, 0), mouse(MOUSEEVENTF_LEFTUP, 0)])?,
+            "click" => send(&[mouse(primary_down, 0), mouse(primary_up, 0)])?,
             "double_click" => send(&[
-                mouse(MOUSEEVENTF_LEFTDOWN, 0),
-                mouse(MOUSEEVENTF_LEFTUP, 0),
-                mouse(MOUSEEVENTF_LEFTDOWN, 0),
-                mouse(MOUSEEVENTF_LEFTUP, 0),
+                mouse(primary_down, 0),
+                mouse(primary_up, 0),
+                mouse(primary_down, 0),
+                mouse(primary_up, 0),
             ])?,
-            "right_click" => send(&[
-                mouse(MOUSEEVENTF_RIGHTDOWN, 0),
-                mouse(MOUSEEVENTF_RIGHTUP, 0),
-            ])?,
+            "right_click" => send(&[mouse(secondary_down, 0), mouse(secondary_up, 0)])?,
             "scroll" => {
                 let delta = a["delta"]
                     .as_i64()
@@ -524,7 +587,7 @@ mod native {
         let mut pointer = POINT::default();
         unsafe {
             ensure!(
-                GetCursorPos(&mut pointer) != 0,
+                GetPhysicalCursorPos(&mut pointer) != 0,
                 "Cannot verify pointer position"
             );
         }
@@ -536,7 +599,7 @@ mod native {
             );
         }
         Ok(
-            json!({"operation":op,"input_sent":true,"pointer":{"x":pointer.x,"y":pointer.y},"foreground":observed["windows"].as_array().and_then(|w|w.iter().find(|w|w["active"]==true)),"verified":matches!(op,"focus"|"move"),"verification_note":"Typing, clicks and shortcuts require application state or screenshot verification."}),
+            json!({"operation":op,"input_sent":true,"pointer":{"x":pointer.x,"y":pointer.y},"foreground":observed["windows"].as_array().and_then(|w|w.iter().find(|w|w["active"]==true)),"verified":matches!(op,"focus"|"move"),"verification_state":if matches!(op,"focus"|"move"){"verified"}else{"sent"},"verification_note":"Input was sent. The attached screenshot and focused-control readback are observations; verify the requested application effect before reporting success."}),
         )
     }
 }
@@ -570,6 +633,19 @@ mod screenshot_tests {
     use base64::{Engine, engine::general_purpose::STANDARD};
 
     #[test]
+    fn physical_coordinates_map_to_virtual_desktop_pixel_centres() -> Result<()> {
+        for (origin, extent) in [(0, 1920), (-1920, 3840), (-1200, 1200)] {
+            for offset in 0..extent {
+                let normalized = i64::from(absolute_axis(origin + offset, origin, extent)?);
+                assert_eq!(normalized * extent / 65_536, offset);
+            }
+            assert!(absolute_axis(origin - 1, origin, extent).is_err());
+            assert!(absolute_axis(origin + extent, origin, extent).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn noisy_screenshot_is_valid_png_and_fits_wire_budget() -> Result<()> {
         let mut seed = 123456789u32;
         let image = image::RgbImage::from_fn(1280, 800, |_, _| {
@@ -597,6 +673,20 @@ mod screenshot_tests {
         let wire =
             json!({"png_base64":STANDARD.encode(png),"image_width":width,"image_height":height});
         assert!(serde_json::to_vec(&wire)?.len() < 1_000_000);
+        Ok(())
+    }
+
+    #[test]
+    fn jpeg_fallback_decodes_and_fits_structured_client_budget() -> Result<()> {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(1920, 1200, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 253) as u8, ((x * y) % 255) as u8])
+        }));
+        let (jpeg, width, height) = bounded_jpeg(&image)?;
+        assert!(jpeg.len() <= 100_000);
+        assert!(STANDARD.encode(&jpeg).len() < 170_000);
+        assert!(width <= 960 && height <= 600);
+        let decoded = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg)?;
+        assert_eq!((decoded.width(), decoded.height()), (width, height));
         Ok(())
     }
 

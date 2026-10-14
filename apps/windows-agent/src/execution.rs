@@ -39,7 +39,15 @@ pub async fn execute(
         "system_inventory" => crate::system::execute(&a).await,
         "desktop_inspect" | "desktop_automation" => {
             let write = action == "desktop_automation";
-            tokio::task::spawn_blocking(move || crate::automation::execute(&a, write)).await?
+            let p = p.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut result = crate::automation::execute(&a, write)?;
+                if write {
+                    observe_desktop(&p, &a, &mut result);
+                }
+                Ok(result)
+            })
+            .await?
         }
         "file_recovery" => {
             let (p, state) = (p.clone(), state.to_owned());
@@ -84,13 +92,41 @@ pub async fn execute(
         "process_manage" => tokio::task::spawn_blocking(move || processes(&a)).await?,
         "desktop_windows" => tokio::task::spawn_blocking(desktop::windows).await?,
         "desktop_screenshot" => tokio::task::spawn_blocking(desktop::screenshot).await?,
-        "desktop_interact" => tokio::task::spawn_blocking(move || desktop::interact(&a)).await?,
+        "desktop_interact" => {
+            let p = p.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut result = desktop::interact(&a)?;
+                observe_desktop(&p, &a, &mut result);
+                Ok(result)
+            })
+            .await?
+        }
         "file_read" | "file_write" | "file_search" | "file_operation" => {
             let p = p.clone();
             let action = action.to_owned();
             tokio::task::spawn_blocking(move || files::execute(&p, &action, &a)).await?
         }
         _ => bail!("Unsupported action"),
+    }
+}
+fn observe_desktop(p: &Policy, args: &Value, result: &mut Value) {
+    if !p.allow_screenshots || args["capture_after"].as_bool() == Some(false) {
+        result["observation_status"] = json!("disabled");
+        return;
+    }
+    std::thread::sleep(Duration::from_millis(150));
+    match desktop::screenshot() {
+        Ok(image) => {
+            result["screenshot"] = image;
+            result["observation_status"] = json!("captured");
+        }
+        Err(error) => {
+            result["observation_status"] = json!("unavailable");
+            result["observation_error"] = json!(error.to_string());
+        }
+    }
+    if let Ok(focused) = crate::automation::focused() {
+        result["focused_control"] = focused;
     }
 }
 fn system_info() -> Result<Value> {
@@ -285,8 +321,28 @@ pub async fn terminal_with_output(
     );
     let mut command = match a["shell"].as_str().unwrap_or("powershell") {
         "powershell" => {
-            let mut c = Command::new("powershell.exe");
-            c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", text]);
+            #[cfg(windows)]
+            let executable = std::path::PathBuf::from(
+                std::env::var_os("WINDIR")
+                    .ok_or_else(|| anyhow::anyhow!("WINDIR is unavailable"))?,
+            )
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+            #[cfg(not(windows))]
+            let executable = std::path::PathBuf::from("powershell.exe");
+            let mut c = Command::new(executable);
+            #[cfg(windows)]
+            let script = format!(
+                "Import-Module -Name (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop\n{text}"
+            );
+            #[cfg(not(windows))]
+            let script = text.to_owned();
+            c.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ]);
             c
         }
         "cmd" => {
@@ -318,6 +374,32 @@ pub async fn terminal_with_output(
             );
             command.env(key, v);
         }
+    }
+    #[cfg(windows)]
+    if a["shell"].as_str().unwrap_or("powershell") == "powershell" {
+        let native_modules = std::path::PathBuf::from(
+            std::env::var_os("WINDIR").ok_or_else(|| anyhow::anyhow!("WINDIR is unavailable"))?,
+        )
+        .join("System32/WindowsPowerShell/v1.0/Modules");
+        let requested = a["env"]
+            .as_object()
+            .and_then(|env| {
+                env.iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case("PSModulePath"))
+            })
+            .and_then(|(_, value)| value.as_str())
+            .map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("PSModulePath"))
+            .unwrap_or_default();
+        let paths = std::iter::once(native_modules.clone()).chain(
+            std::env::split_paths(&requested).filter(|path| {
+                !path.as_os_str().is_empty()
+                    && !path
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(&native_modules.to_string_lossy())
+            }),
+        );
+        command.env("PSModulePath", std::env::join_paths(paths)?);
     }
     command
         .current_dir(cwd)
@@ -433,6 +515,28 @@ mod tests {
             allow_screenshots: false,
             ask_before_sensitive: true,
         };
+        let hash_file = t.path().join("hash-fixture.txt");
+        std::fs::write(&hash_file, b"PowerShell native module fixture")?;
+        let native_command = format!(
+            "$ErrorActionPreference='Stop'; (Get-FileHash -LiteralPath '{}' -Algorithm SHA256).Hash",
+            hash_file.to_string_lossy().replace('\'', "''")
+        );
+        let hash = terminal(&p, &json!({"cwd":t.path(),"command":native_command,"env":{"PSModulePath":"C:\\nonexistent-module-fixture"}}), Arc::new(AtomicBool::new(false)), 10).await?;
+        ensure!(
+            hash["exit_code"] == 0,
+            "Get-FileHash could not load the native PowerShell module"
+        );
+        use sha2::{Digest, Sha256};
+        ensure!(
+            hash["stdout"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .eq_ignore_ascii_case(&hex::encode(Sha256::digest(
+                    b"PowerShell native module fixture"
+                ))),
+            "Get-FileHash returned the wrong digest"
+        );
         let a =
             json!({"cwd":t.path(),"shell":"powershell","command":"Write-Output 'verified-rust'"});
         let flag = Arc::new(AtomicBool::new(false));

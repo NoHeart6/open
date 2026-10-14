@@ -40,8 +40,10 @@ test('real MCP SDK discovery, schema errors, permission errors and auth challeng
   const noAuth=await fetch(c.resource,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(noAuth.status,401);assert.match(noAuth.headers.get('www-authenticate')??'',/resource_metadata/);
   const badOrigin=await fetch(c.resource,{method:'POST',headers:{Origin:'https://evil.example','Content-Type':'application/json'},body:'{}'});assert.equal(badOrigin.status,403);
   await client.connect(new StreamableHTTPClientTransport(new URL(c.resource),{requestInit:{headers:{Authorization:`Bearer ${await token('computer:read')}`}}}));
-  const tools=await client.listTools();assert.equal(tools.tools.length,Object.keys(actions).length+compatibilityTools.length+9);assert(tools.tools.every(t=>t.inputSchema.type==='object'));assert(tools.tools.every(t=>t.outputSchema?.type==='object'));for(const name of compatibilityTools)assert(tools.tools.some(t=>t.name===name));
+  const tools=await client.listTools();assert.equal(tools.tools.length,Object.keys(actions).length+compatibilityTools.length+10);assert(tools.tools.every(t=>t.inputSchema.type==='object'));assert(tools.tools.every(t=>t.outputSchema?.type==='object'));for(const name of compatibilityTools)assert(tools.tools.some(t=>t.name===name));
   assert.equal(tools.tools.find(t=>t.name==='task_output')?.annotations?.readOnlyHint,true);
+  const viewer=tools.tools.find(t=>t.name==='desktop_view');assert.equal(viewer?.annotations?.readOnlyHint,true);assert.equal(viewer?._meta?.['openai/outputTemplate'],'ui://opencommander/desktop-v1.html');
+  const template=await client.readResource({uri:'ui://opencommander/desktop-v1.html'});assert.equal(template.contents[0]?.mimeType,'text/html;profile=mcp-app');assert('text' in template.contents[0]!&&template.contents[0].text.includes('ui/notifications/tool-result'));
   const modern=new ModernClient({name:'modern-test',version:'1.0.0'},{versionNegotiation:{mode:{pin:'2026-07-28'}}});
   try{
    await modern.connect(new ModernTransport(new URL(c.resource),{requestInit:{headers:{Authorization:`Bearer ${await token('computer:read')}`}}}));
@@ -78,4 +80,26 @@ test('request correlation never logs tokens, private paths or tool input content
   assert(events.some(e=>e.event==='mcp_request'&&e.request_id===record.request_id&&e.authenticated===true));
   const logged=JSON.stringify(events);for(const secret of [access,'private-body-password','private-injected-header','private-file-content','private-path','private-owner',cfg.bridgeKey])assert(!logged.includes(secret));
  }finally{await client.close();await new Promise<void>(r=>listener.close(()=>r()));await new Promise<void>(r=>gateway.close(()=>r()));}
+});
+
+test('desktop_screenshot returns a completed image in the original tool call without resubmitting the task',async()=>{
+ let submissions=0,reads=0;
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2YwAAAABJRU5ErkJggg==';
+ const gateway=createServer((req,res)=>{
+  res.setHeader('Content-Type','application/json');
+  if(req.method==='POST'&&req.url==='/api/tasks'){submissions++;res.end(JSON.stringify({task_id:'screenshot-fixture',status:'queued'}));}
+  else if(req.method==='GET'&&req.url==='/api/tasks/screenshot-fixture'){reads++;res.end(JSON.stringify(reads<3?{task_id:'screenshot-fixture',status:reads===1?'dispatched':'running'}:{task_id:'screenshot-fixture',status:'succeeded',result:{png_base64:png,image_width:1,image_height:1}}));}
+  else{res.statusCode=404;res.end('{}');}
+ }).listen(0,'127.0.0.1');await new Promise<void>(resolve=>gateway.once('listening',resolve));
+ const address=gateway.address();assert(address&&typeof address!=='string');const cfg={...c,gateway:`http://127.0.0.1:${address.port}`};
+ const listener=app(cfg).listen(0,'127.0.0.1');await new Promise<void>(resolve=>listener.once('listening',resolve));const mcp=listener.address();assert(mcp&&typeof mcp!=='string');cfg.resource=`http://127.0.0.1:${mcp.port}/mcp`;
+ const access=await new SignJWT({scope:'computer:read'}).setProtectedHeader({alg:'HS256'}).setIssuer(cfg.issuer).setSubject('alice').setJti('screenshot-token').setAudience(cfg.resource).setIssuedAt().setExpirationTime('1m').sign(new TextEncoder().encode(cfg.devKey));
+ const client=new Client({name:'screenshot-regression',version:'1.0.0'});
+ try{
+  await client.connect(new StreamableHTTPClientTransport(new URL(cfg.resource),{requestInit:{headers:{Authorization:`Bearer ${access}`}}}));
+  const result=await client.callTool({name:'desktop_screenshot',arguments:{device_id:'fixture-device',idempotency_key:'screenshot-request'}});
+  assert.equal(result.isError,undefined);assert.equal(result.structuredContent?.status,'succeeded');assert.equal(result.structuredContent?.task_id,'screenshot-fixture');
+  assert.deepEqual(result.content[0],{type:'image',data:png,mimeType:'image/png'});assert(!JSON.stringify(result.structuredContent).includes(png));
+  assert.equal(submissions,1);assert.equal(reads,3);
+ }finally{await client.close();await new Promise<void>(resolve=>listener.close(()=>resolve()));await new Promise<void>(resolve=>gateway.close(()=>resolve()));}
 });

@@ -1,6 +1,7 @@
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path $PSScriptRoot -Parent
 $artifactRoot=Join-Path $repoRoot artifacts
+$version=(Select-String -LiteralPath (Join-Path $repoRoot 'apps/windows-agent/Cargo.toml') -Pattern '^version = "([0-9.]+)"$').Matches[0].Groups[1].Value
 $licenseRoot=Join-Path $artifactRoot 'licenses'
 New-Item -ItemType Directory -Force -Path $licenseRoot | Out-Null
 function Copy-LicenseFiles([string]$Directory,[string]$Label){
@@ -22,7 +23,7 @@ $setup=Join-Path $artifactRoot OpenCommanderSetup.exe
 Copy-Item -LiteralPath (Join-Path $repoRoot LICENSE) -Destination $artifactRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination $artifactRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\INSTALL_WINDOWS.md') -Destination (Join-Path $artifactRoot 'INSTALL_WINDOWS.md')
-Compress-Archive -LiteralPath $agent,$setup,(Join-Path $artifactRoot LICENSE),(Join-Path $artifactRoot THIRD_PARTY_NOTICES.md),(Join-Path $artifactRoot INSTALL_WINDOWS.md),$licenseRoot -DestinationPath (Join-Path $artifactRoot 'opencommander-0.1.0-windows-x64.zip') -Force
+Compress-Archive -LiteralPath $agent,$setup,(Join-Path $artifactRoot LICENSE),(Join-Path $artifactRoot THIRD_PARTY_NOTICES.md),(Join-Path $artifactRoot INSTALL_WINDOWS.md),$licenseRoot -DestinationPath (Join-Path $artifactRoot "OpenCommander-Windows-$version.zip") -Force
 $files=Get-ChildItem -LiteralPath $artifactRoot -File | Where-Object {$_.Extension -eq '.exe' -or $_.Extension -eq '.zip' -or $_.Name -eq 'opencommander-gateway-linux-amd64'}
 $files | ForEach-Object {"$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"} | Set-Content -LiteralPath (Join-Path $artifactRoot 'SHA256SUMS.txt')
 Write-Output "Packaged unsigned Windows binaries with dependency notices and checksums. No fixture screenshots, tokens, database or state were included."
