@@ -4,7 +4,7 @@ Agent v0.2.7 sudah terpasang pada PC pemilik dan terhubung ke gateway. Plugin ak
 
 | Fitur | Bukti setelah perbaikan |
 | --- | --- |
-| Screenshot | Panggilan asli `desktop_screenshot` mengembalikan status succeeded, blok MCP image/jpeg dan JPEG identik pada `result.image_data`. `task_status` dan `desktop_view` mempertahankan gambar tersebut. |
+| Screenshot | Panggilan asli `desktop_screenshot` mengembalikan status succeeded, blok MCP image/jpeg dan JPEG identik pada `result.image_data`. `task_status` dan `desktop_view` mempertahankan gambar tersebut. Pengguna mengonfirmasi AI di ChatGPT biasa dapat melihat dan menjelaskan layar setelah penerusan gambar melalui `image()`. |
 | UI Automation | Focus dan set_value memverifikasi foreground/teks; select membaca kembali status pilihan. Invoke melaporkan sent, lalu efeknya dibuktikan melalui penghitung pada fixture. |
 | Mouse dan keyboard | Teks hasil pengetikan dibaca kembali; klik menaikkan penghitung tombol; drag mencapai endpoint; scroll mengubah item list yang terlihat. Semua mengembalikan screenshot setelah tindakan. |
 | Get-FileHash | PowerShell 5.1 native berhasil menghitung SHA-256 yang sesuai, termasuk ketika PSModulePath pada request berisi direktori yang tidak ada. |
@@ -21,7 +21,9 @@ Server mengirim JPEG sebagai blok gambar MCP dan menyediakan `result.image_data 
 
 Pengujian produksi: task `pciXtfXCJXSvMLSWVPoTFzmp`, request `4b49438f-b48d-4846-89f4-4dd6dd15c513`, gambar 720 × 450, 69.688 byte, Base64 92.920 karakter. Gambar, Base64 dan desktop pengguna tidak disertakan dalam Git atau laporan ini. Klien independen memverifikasi bahwa panggilan asli, task_status dan desktop_view menghasilkan JPEG yang sama.
 
-Panel privat menggunakan resource MCP App `ui://opencommander/desktop-v1.html`. Browser fixture memverifikasi gambar PNG dimuat melalui notifikasi tool-result standar. Dukungan panel di ChatGPT dan penerimaan visual screenshot bawaan oleh model setelah pembaruan ini belum dibuktikan dari host pengguna. Jalur alternatif terminal/image() sebelumnya sudah dinyatakan PASS oleh pengguna.
+Panel privat menggunakan resource MCP App `ui://opencommander/desktop-v1.html`. Browser fixture memverifikasi gambar PNG dimuat melalui notifikasi tool-result standar. Dukungan panel di ChatGPT belum dikonfirmasi; penerimaan gambar melalui image() dikonfirmasi terpisah.
+
+Pada 15 Oktober 2026, pengguna diminta menguji `desktop_screenshot` di ChatGPT biasa, meneruskan `result.image_data` melalui `image()`, lalu meminta AI menjelaskan isi layar. Jawaban pengguna: "Ya, bisa melihat dan menjelaskan layar". Penerimaan visual screenshot bawaan di host tersebut dicatat PASS berdasarkan konfirmasi pengguna. Konfirmasi ini melengkapi bukti pengiriman gambar dari klien independen; tidak tersedia transcript tool mentah tambahan untuk percobaan pengguna tersebut.
 
 ## Mouse, UI Automation dan PowerShell
 

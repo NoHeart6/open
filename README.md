@@ -6,7 +6,7 @@ ChatGPT → MCP server TypeScript → gateway Go → agent Rust → Windows.
 
 ## Status saat ini
 
-Agent Windows dan plugin v0.2.7 sudah terpasang; server MCP produksi sudah diperbarui. Fokus UI Automation, isi teks, invoke, select, pengetikan, klik, drag, scroll dan `Get-FileHash` lulus pengujian pada agent terpasang. Screenshot langsung mengembalikan gambar MCP serta JPEG pada `result.image_data` untuk klien yang hanya meneruskan hasil terstruktur. Bukti dan batas pengujian ada di `docs/USABILITY_FIX_2026-10-15.md`. Akses seluruh profil, semua aplikasi dan izin tetap yang diaktifkan pemilik masih tersimpan. Pengenalan screenshot bawaan di percakapan ChatGPT pengguna masih menunggu pengujian host setelah pembaruan ini.
+Agent Windows dan plugin v0.2.7 sudah terpasang; server MCP produksi sudah diperbarui. Fokus UI Automation, isi teks, invoke, select, pengetikan, klik, drag, scroll dan `Get-FileHash` lulus pengujian pada agent terpasang. Screenshot langsung mengembalikan gambar MCP serta JPEG pada `result.image_data` untuk klien yang hanya meneruskan hasil terstruktur. Bukti dan batas pengujian ada di `docs/USABILITY_FIX_2026-10-15.md`. Akses seluruh profil, semua aplikasi dan izin tetap yang diaktifkan pemilik masih tersimpan. Pada 15 Oktober 2026, pengguna mengonfirmasi AI di ChatGPT biasa dapat melihat dan menjelaskan screenshot bawaan setelah penerusan `result.image_data` melalui `image()`.
 
 ## Struktur
 
