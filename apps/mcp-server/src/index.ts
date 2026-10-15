@@ -14,7 +14,7 @@ export function app(c:Config,record:(event:Record<string,unknown>)=>void=event=>
   const requestId=randomUUID();const started=Date.now();res.locals.requestId=requestId;res.setHeader('X-OpenCommander-Request-ID',requestId);
   res.once('finish',()=>{if(req.path==='/mcp')record({event:'mcp_request',at:new Date().toISOString(),request_id:requestId,http_method:req.method,rpc_method:['initialize','tools/list','tools/call','ping','notifications/initialized'].includes(req.body?.method)?req.body.method:'other',authenticated:res.locals.authenticated===true,status:res.statusCode,duration_ms:Date.now()-started});});next();
  });
- a.use(express.json({limit:'256kb'}));
+ a.use(express.json({limit:'2mb'}));
  const authenticate=authenticator(c);
  a.use((_req,res,next)=>{res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');next();});
  a.get('/healthz',(_req,res)=>res.json({status:'ok',version:serverVersion}));
