@@ -25,7 +25,8 @@ func TestMangaMotionTaskCategories(t *testing.T) {
 		{"list", "READ"}, {"inspect", "READ"},
 		{"patch", "SENSITIVE"},
 		{"compile_motion", "SENSITIVE"},
-		{"import_image", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
+		{"import_image", "SENSITIVE"},
+		{"import_psd", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
 	}
 	for _, c := range cases {
 		arg, _ := json.Marshal(map[string]string{"op": c.op})

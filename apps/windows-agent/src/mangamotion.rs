@@ -21,6 +21,7 @@ const OPERATIONS: &[&str] = &[
     "render_video",
     "compile_motion",
     "import_image",
+    "import_psd",
 ];
 
 pub async fn run(
@@ -39,7 +40,12 @@ pub async fn run(
     );
     let writes = matches!(
         op,
-        "patch" | "render_still" | "render_video" | "compile_motion" | "import_image"
+        "patch"
+            | "render_still"
+            | "render_video"
+            | "compile_motion"
+            | "import_image"
+            | "import_psd"
     );
     if writes {
         ensure!(policy.allow_modify, "Modification permission is disabled");
