@@ -13,7 +13,15 @@ use std::{
 };
 use tokio::{io::AsyncWriteExt, process::Command};
 
-const OPERATIONS: &[&str] = &["list", "inspect", "patch", "render_still", "render_video"];
+const OPERATIONS: &[&str] = &[
+    "list",
+    "inspect",
+    "patch",
+    "render_still",
+    "render_video",
+    "compile_motion",
+    "import_image",
+];
 
 pub async fn run(
     policy: &crate::policy::Policy,
@@ -29,7 +37,10 @@ pub async fn run(
         OPERATIONS.contains(&op),
         "Unsupported MangaMotion operation"
     );
-    let writes = matches!(op, "patch" | "render_still" | "render_video");
+    let writes = matches!(
+        op,
+        "patch" | "render_still" | "render_video" | "compile_motion" | "import_image"
+    );
     if writes {
         ensure!(policy.allow_modify, "Modification permission is disabled");
     }

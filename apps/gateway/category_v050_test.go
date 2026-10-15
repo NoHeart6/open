@@ -23,7 +23,9 @@ func TestV050TaskCategories(t *testing.T) {
 func TestMangaMotionTaskCategories(t *testing.T) {
 	cases := []struct{ op, expected string }{
 		{"list", "READ"}, {"inspect", "READ"},
-		{"patch", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
+		{"patch", "SENSITIVE"},
+		{"compile_motion", "SENSITIVE"},
+		{"import_image", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
 	}
 	for _, c := range cases {
 		arg, _ := json.Marshal(map[string]string{"op": c.op})
