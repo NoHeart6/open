@@ -12,8 +12,8 @@ const repo=fileURLToPath(new URL('../../..',import.meta.url));
 const config=JSON.parse(await readFile(repo+'/.runtime/railway/deployment.json','utf8')) as Record<string,string>;
 const resource=config.mcp_url!;const issuer=config.auth_url!+'/realms/opencommander';
 let input='';for await(const part of process.stdin)input+=String(part);
-const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean;verify_media?:boolean;verify_media_url?:boolean};input='';
-const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true||credentials.verify_media===true||credentials.verify_media_url===true;
+const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean;verify_media?:boolean;verify_media_url?:boolean;verify_assets?:boolean};input='';
+const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true||credentials.verify_media===true||credentials.verify_media_url===true||credentials.verify_assets===true;
 const fixtures:{folder:string;file:string}[]=[];
 const report:{at:string;client:string;host_chatgpt:string;checks:Record<string,unknown>[];system_info?:unknown;device_id?:string;task_id?:string}={at:new Date().toISOString(),client:'independent raw HTTP JSON-RPC, not ChatGPT host',host_chatgpt:'NOT VERIFIED',checks:[]};
 const pass=(name:string,detail?:unknown)=>{report.checks.push({name,status:'PASS',detail});console.log('PASS '+name)};
@@ -54,6 +54,53 @@ try{
   async function operate(name:string,args:Record<string,unknown>){const submitted=await call(name,{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,...args});assert(!submitted.error,'MCP '+name+' request rejected: '+JSON.stringify(submitted.data.error));for(let n=0;n<80;n++){const polled=await call('task_status',{task_id:submitted.data.task_id});assert(!polled.error);if(credentials.verify_unattended||credentials.verify_desktop||credentials.verify_all_applications||credentials.verify_usability)assert.notEqual(polled.data.status,'approval_pending','Trusted owner task unexpectedly requested a click');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(polled.data.status)))return {...polled.data,_content:polled.content};await new Promise(r=>setTimeout(r,250))}throw new Error('Profile access task did not finish')}
 
 
+
+ if(credentials.verify_assets){
+  stage='ChatGPT fileParams automatic asset delivery over production MCP';
+  const user=String((info.workspace as {user_profile:string}).user_profile);
+  const folder=join(user,'OC_PLUGIN_TEST_20261014');
+  const destination=join(folder,'fileparams_auto_'+randomUUID()+'.png');
+  const cli=join(user,'Documents','WordCraft','wordcraft-0.7.0-windows-x64-portable','wordcraft-cli.exe');
+  const file={file_id:'file_fixture_w3c_home_png',download_url:'https://www.w3.org/Icons/w3c_home.png',mime_type:'image/png',file_name:'chatgpt_generated_test.png'};
+  const docPath=join(user,'Documents','WordCraft','MCP Documents','OC_FILEPARAMS_AUTO_TEST_20261015.docx');
+  try {
+    const submitted=await operate('asset_deliver',{file,destination,insert_into_wordcraft:true,wordcraft_cli_path:cli,wordcraft_port:7981,width_pt:110,alt_text:'ChatGPT fileParams asset bridge verified'});
+    assert.equal(submitted.status,'succeeded','asset_deliver failed: '+String(submitted.error??''));
+    const result=submitted.result as Record<string,unknown>;
+    assert.equal(result.saved,true);
+    assert.equal(result.inserted_into_wordcraft,true);
+    const bytes=await readFile(destination);
+    assert(bytes.length>100);
+    assert.equal(result.sha256,createHash('sha256').update(bytes).digest('hex'));
+    const inspected=await operate('wordcraft',{cli_path:cli,port:7981,tool:'inspect_document',arguments:{}});
+    assert.equal(inspected.status,'succeeded');
+    assert(JSON.stringify((inspected.result as Record<string,unknown>).result).includes('ChatGPT fileParams asset bridge verified'));
+    const saved=await operate('wordcraft',{cli_path:cli,port:7981,tool:'save_document',arguments:{path:docPath}});
+    assert.equal(saved.status,'succeeded');
+    pass('asset_deliver fetched PNG from fileParams object, saved to Windows and inserted in WordCraft',{bytes:bytes.length,sha256:result.sha256});
+    const nonce=randomUUID();
+    const batchPaths=[join(folder,'batch_'+nonce+'.png'),join(folder,'batch_'+nonce+'.bin')];
+    const files=[
+      {file_id:'file_fixture_batch_png',download_url:'https://www.w3.org/Icons/w3c_home.png',file_name:'batch_'+nonce+'.png',mime_type:'image/png'},
+      {file_id:'file_fixture_batch_bin',download_url:'https://speed.cloudflare.com/__down?bytes=65536',file_name:'batch_'+nonce+'.bin',mime_type:'application/octet-stream'}
+    ];
+    try{
+      const batch=await operate('assets_deliver',{files,directory:folder});
+      assert.equal(batch.status,'succeeded',String(batch.error));
+      const output=batch.result as {saved_count:number;total:number;results:{saved:boolean;sha256:string;bytes:number}[]};
+      assert.equal(output.saved_count,2);
+      assert.equal(output.total,2);
+      for(let i=0;i<2;i++){
+        const data=await readFile(batchPaths[i]!);
+        assert.equal(output.results[i]?.saved,true);
+        assert.equal(output.results[i]?.bytes,data.length);
+        assert.equal(output.results[i]?.sha256,createHash('sha256').update(data).digest('hex'));
+      }
+      pass('assets_deliver transferred 2 ChatGPT fileParams files in one tool call with exact SHA-256');
+    }finally{for(const path of batchPaths){await unlink(path).catch(()=>{});await unlink(path+'.asset.part').catch(()=>{});await unlink(path+'.asset.json').catch(()=>{});}}
+
+  }finally {await unlink(destination).catch(()=>{});await unlink(destination+'.asset.part').catch(()=>{});await unlink(destination+'.asset.json').catch(()=>{});}
+ }
  if(credentials.verify_media_url) {
    stage='production direct HTTPS media fetch through Railway MCP';
    const user=String((info.workspace as {user_profile:string}).user_profile);
