@@ -12,8 +12,8 @@ const repo=fileURLToPath(new URL('../../..',import.meta.url));
 const config=JSON.parse(await readFile(repo+'/.runtime/railway/deployment.json','utf8')) as Record<string,string>;
 const resource=config.mcp_url!;const issuer=config.auth_url!+'/realms/opencommander';
 let input='';for await(const part of process.stdin)input+=String(part);
-const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean};input='';
-const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true;
+const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean};input='';
+const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true;
 const fixtures:{folder:string;file:string}[]=[];
 const report:{at:string;client:string;host_chatgpt:string;checks:Record<string,unknown>[];system_info?:unknown;device_id?:string;task_id?:string}={at:new Date().toISOString(),client:'independent raw HTTP JSON-RPC, not ChatGPT host',host_chatgpt:'NOT VERIFIED',checks:[]};
 const pass=(name:string,detail?:unknown)=>{report.checks.push({name,status:'PASS',detail});console.log('PASS '+name)};
@@ -52,6 +52,30 @@ try{
  stage='real Windows system_info';const submitted=await call('system_info',{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30});assert(!submitted.error);report.task_id=String(submitted.data.task_id);pass('Read-only system_info submitted',{task_id:report.task_id,request_id:submitted.requestId});
  let completed:Awaited<ReturnType<typeof call>>|undefined;for(let n=0;n<60;n++){const status=await call('task_status',{task_id:report.task_id});assert(!status.error);if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(status.data.status))){completed=status;break}await new Promise(r=>setTimeout(r,500));}assert.equal(completed?.data.status,'succeeded');const info=completed!.data.result as Record<string,unknown>;assert.equal(info.os,'Windows');assert(typeof info.cpu==='string'&&info.cpu.length>0);assert(Number(info.memory_total_bytes)>0);assert(Number(info.uptime_seconds)>0);report.system_info=info;pass('Actual Windows OS, CPU, RAM and uptime returned',{task_id:report.task_id,request_id:completed!.requestId});
   async function operate(name:string,args:Record<string,unknown>){const submitted=await call(name,{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,...args});assert(!submitted.error,'MCP '+name+' request rejected: '+JSON.stringify(submitted.data.error));for(let n=0;n<80;n++){const polled=await call('task_status',{task_id:submitted.data.task_id});assert(!polled.error);if(credentials.verify_unattended||credentials.verify_desktop||credentials.verify_all_applications||credentials.verify_usability)assert.notEqual(polled.data.status,'approval_pending','Trusted owner task unexpectedly requested a click');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(polled.data.status)))return {...polled.data,_content:polled.content};await new Promise(r=>setTimeout(r,250))}throw new Error('Profile access task did not finish')}
+ if(credentials.verify_image){
+  stage='production image_place writes a PNG and inserts it into WordCraft';
+  const profile=String((info.workspace as {user_profile:string}).user_profile);
+  const source=join(profile,'OC_PLUGIN_TEST_20261014','opencommander-image-fixture.png');
+  const bytes=await readFile(source);assert(bytes.length>100);
+  const target=join(profile,'OC_PLUGIN_TEST_20261014','oc_import_probe_'+randomUUID()+'.png');
+  const cli=join(profile,'Documents','WordCraft','wordcraft-0.7.0-windows-x64-portable','wordcraft-cli.exe');
+  const fresh=await operate('wordcraft',{cli_path:cli,port:7981,tool:'new_document',arguments:{}});
+  assert.equal(fresh.status,'succeeded');
+  try{
+   const imported=await operate('image_place',{destination:target,image_base64:bytes.toString('base64'),wordcraft_cli_path:cli,wordcraft_port:7981,width_pt:150,alt_text:'OpenCommander import probe'});
+   assert.equal(imported.status,'succeeded','Image tool failed: '+String(imported.error??''));
+   const image=imported.result as Record<string,unknown>;
+   assert.equal(image.saved,true);assert.equal(image.inserted_into_wordcraft,true);
+   assert.equal(image.sha256,createHash('sha256').update(bytes).digest('hex'));
+   assert.deepEqual(await readFile(target),bytes);
+   pass('Image_place saves exact PNG bytes on Windows through production MCP',{path:target,bytes:bytes.length});
+   const inspected=await operate('wordcraft',{cli_path:cli,port:7981,tool:'inspect_document',arguments:{}});
+   assert.equal(inspected.status,'succeeded');
+   const doc=(inspected.result as Record<string,unknown>).result as Record<string,unknown>;
+   assert(JSON.stringify(doc.blocks).includes('OpenCommander import probe'));
+   pass('Image_place inserts image into real WordCraft document via production MCP');
+  }finally{await unlink(target).catch(()=>{});}
+ }
  if(credentials.verify_wordcraft){
   stage='production WordCraft native MCP integration';
   const cli=String((info.workspace as Record<string,unknown>).user_profile)+'\\Documents\\WordCraft\\wordcraft-0.7.0-windows-x64-portable\\wordcraft-cli.exe';
