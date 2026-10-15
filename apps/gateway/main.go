@@ -90,7 +90,7 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	respond(w, code, map[string]any{"error": map[string]string{"code": http.StatusText(code), "message": msg}})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
