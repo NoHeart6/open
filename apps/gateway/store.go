@@ -138,6 +138,19 @@ func category(action string, args json.RawMessage) (string, error) {
 		if a.Op == "terminate" {
 			return "SENSITIVE", nil
 		}
+	case "mangamotion":
+		var a struct {
+			Op string `json:"op"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", err
+		}
+		switch a.Op {
+		case "list", "inspect":
+			return "READ", nil
+		case "patch", "render_still", "render_video":
+			return "SENSITIVE", nil
+		}
 	case "visual_agent", "workflow", "wordcraft_compose", "image_place", "asset_deliver", "assets_deliver", "media_transfer", "wordcraft", "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
 		return "SENSITIVE", nil
 	case "terminal_screen":

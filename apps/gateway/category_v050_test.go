@@ -19,3 +19,22 @@ func TestV050TaskCategories(t *testing.T) {
 		}
 	}
 }
+
+func TestMangaMotionTaskCategories(t *testing.T) {
+	cases := []struct{ op, expected string }{
+		{"list", "READ"}, {"inspect", "READ"},
+		{"patch", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
+	}
+	for _, c := range cases {
+		arg, _ := json.Marshal(map[string]string{"op": c.op})
+		got, err := category("mangamotion", arg)
+		if err != nil || got != c.expected {
+			t.Errorf("mangamotion %s: got %s, err=%v, expected %s", c.op, got, err, c.expected)
+		}
+	}
+	for _, payload := range []string{`{"op":"arbitrary_shell"}`, `{`, `{}`} {
+		if got, err := category("mangamotion", json.RawMessage(payload)); err == nil {
+			t.Errorf("unsupported task accepted: %q (%s)", payload, got)
+		}
+	}
+}
