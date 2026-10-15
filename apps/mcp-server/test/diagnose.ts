@@ -64,9 +64,7 @@ try{
   const file={file_id:'file_fixture_w3c_home_png',download_url:'https://www.w3.org/Icons/w3c_home.png',mime_type:'image/png',file_name:'chatgpt_generated_test.png'};
   const docPath=join(user,'Documents','WordCraft','MCP Documents','OC_FILEPARAMS_AUTO_TEST_20261015.docx');
   try {
-    const prepared=await operate('wordcraft',{cli_path:cli,port:7981,tool:'new_document',arguments:{}});
-    assert.equal(prepared.status,'succeeded');
-    const submitted=await operate('asset_deliver',{file,destination,wordcraft_cli_path:cli,wordcraft_port:7981,width_pt:110,alt_text:'ChatGPT fileParams asset bridge verified'});
+    const submitted=await operate('asset_deliver',{file,destination,insert_into_wordcraft:true,wordcraft_cli_path:cli,wordcraft_port:7981,width_pt:110,alt_text:'ChatGPT fileParams asset bridge verified'});
     assert.equal(submitted.status,'succeeded','asset_deliver failed: '+String(submitted.error??''));
     const result=submitted.result as Record<string,unknown>;
     assert.equal(result.saved,true);
@@ -80,6 +78,27 @@ try{
     const saved=await operate('wordcraft',{cli_path:cli,port:7981,tool:'save_document',arguments:{path:docPath}});
     assert.equal(saved.status,'succeeded');
     pass('asset_deliver fetched PNG from fileParams object, saved to Windows and inserted in WordCraft',{bytes:bytes.length,sha256:result.sha256});
+    const nonce=randomUUID();
+    const batchPaths=[join(folder,'batch_'+nonce+'.png'),join(folder,'batch_'+nonce+'.bin')];
+    const files=[
+      {file_id:'file_fixture_batch_png',download_url:'https://www.w3.org/Icons/w3c_home.png',file_name:'batch_'+nonce+'.png',mime_type:'image/png'},
+      {file_id:'file_fixture_batch_bin',download_url:'https://speed.cloudflare.com/__down?bytes=65536',file_name:'batch_'+nonce+'.bin',mime_type:'application/octet-stream'}
+    ];
+    try{
+      const batch=await operate('assets_deliver',{files,directory:folder});
+      assert.equal(batch.status,'succeeded',String(batch.error));
+      const output=batch.result as {saved_count:number;total:number;results:{saved:boolean;sha256:string;bytes:number}[]};
+      assert.equal(output.saved_count,2);
+      assert.equal(output.total,2);
+      for(let i=0;i<2;i++){
+        const data=await readFile(batchPaths[i]!);
+        assert.equal(output.results[i]?.saved,true);
+        assert.equal(output.results[i]?.bytes,data.length);
+        assert.equal(output.results[i]?.sha256,createHash('sha256').update(data).digest('hex'));
+      }
+      pass('assets_deliver transferred 2 ChatGPT fileParams files in one tool call with exact SHA-256');
+    }finally{for(const path of batchPaths){await unlink(path).catch(()=>{});await unlink(path+'.asset.part').catch(()=>{});await unlink(path+'.asset.json').catch(()=>{});}}
+
   }finally {await unlink(destination).catch(()=>{});await unlink(destination+'.asset.part').catch(()=>{});await unlink(destination+'.asset.json').catch(()=>{});}
  }
  if(credentials.verify_media_url) {
