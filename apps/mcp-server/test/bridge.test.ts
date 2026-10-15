@@ -49,6 +49,12 @@ test('real MCP SDK discovery, schema errors, permission errors and auth challeng
   const tools=await client.listTools();assert.equal(tools.tools.length,Object.keys(actions).length+compatibilityTools.length+10);assert(tools.tools.every(t=>t.inputSchema.type==='object'));assert(tools.tools.every(t=>t.outputSchema?.type==='object'));for(const name of compatibilityTools)assert(tools.tools.some(t=>t.name===name));
   assert.equal(tools.tools.find(t=>t.name==='task_output')?.annotations?.readOnlyHint,true);
   const terminal=tools.tools.find(t=>t.name==='terminal_execute');const properties=terminal?.inputSchema.properties as Record<string,unknown>;assert(properties.interactive&&properties.stdin&&properties.pty&&properties.success_exit_codes);const input=tools.tools.find(t=>t.name==='terminal_input')?.inputSchema.properties as Record<string,unknown>;assert(input.keys&&input.cols&&input.rows);assert.equal(tools.tools.find(t=>t.name==='terminal_screen')?.annotations?.readOnlyHint,true);
+  const asset=tools.tools.find(t=>t.name==='asset_deliver');
+  assert.deepEqual(asset?._meta?.['openai/fileParams'],['file']);
+  const assetFile=(asset?.inputSchema.properties as Record<string,unknown>)?.file;
+  assert(assetFile);
+  const batchAsset=tools.tools.find(t=>t.name==='assets_deliver');
+  assert.deepEqual(batchAsset?._meta?.['openai/fileParams'],['files']);
   const viewer=tools.tools.find(t=>t.name==='desktop_view');assert.equal(viewer?.annotations?.readOnlyHint,true);assert.equal(viewer?._meta?.['openai/outputTemplate'],'ui://opencommander/desktop-v1.html');
   const template=await client.readResource({uri:'ui://opencommander/desktop-v1.html'});assert.equal(template.contents[0]?.mimeType,'text/html;profile=mcp-app');assert('text' in template.contents[0]!&&template.contents[0].text.includes('ui/notifications/tool-result'));
   const modern=new ModernClient({name:'modern-test',version:'1.0.0'},{versionNegotiation:{mode:{pin:'2026-07-28'}}});
@@ -131,4 +137,14 @@ test('media_transfer supports resumable 512 MiB transfers with bounded payload c
  assert.equal(z.safeParse({op:'fetch',destination,transfer_id:'a'.repeat(32),source_url:'https://example.com/large-image.png'}).success,true);
  assert.equal(z.safeParse({op:'finish',destination,transfer_id:'a'.repeat(32)}).success,true);
  assert.equal(z.safeParse({op:'status',destination,transfer_id:'a'.repeat(32)}).success,true);
+});
+
+test('ChatGPT asset bridge fileParams require signed URL and file ID',()=>{
+ const file={file_id:'file-generated-naruto',download_url:'https://files.oaiusercontent.com/signed-file',mime_type:'image/png',file_name:'Naruto.png'};
+ assert.equal(actions.asset_deliver.schema.safeParse({file}).success,true);
+ assert.equal(actions.assets_deliver.schema.safeParse({files:[file]}).success,true);
+ assert.equal(actions.asset_deliver.schema.safeParse({file:{file_id:file.file_id}}).success,false);
+ assert.equal(actions.asset_deliver.schema.safeParse({file:{download_url:file.download_url}}).success,false);
+ assert.equal(actions.asset_deliver.schema.safeParse({file:{...file,file_id:''}}).success,false);
+ assert.equal(actions.assets_deliver.schema.safeParse({files:[]}).success,false);
 });

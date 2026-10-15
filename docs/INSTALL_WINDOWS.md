@@ -14,7 +14,7 @@ Terminal mendukung empat task bersamaan. `terminal_execute` dengan `interactive=
 
 Proses yang selesai normal memiliki status task `succeeded`; periksa `exit_code` dan `program_succeeded` untuk hasil programnya. `success_exit_codes` default `[0]`; untuk pilihan normal `choice`, tetapkan kode yang diterima, misalnya `[1,2]`. Kegagalan peluncuran dan timeout tetap gagal, sedangkan pembatalan memiliki status `cancelled`.
 
-Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.4 memuat 36 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
+Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.5 memuat 38 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
 
 Metadata rilis memakai tanda tangan Ed25519 dan checksum SHA-256. Executable belum ditandatangani Authenticode.
 
@@ -37,3 +37,12 @@ Tool `media_transfer` menyimpan file asli ke Windows secara bertahap; tidak perl
 - **Batalkan**: `op=cancel` membersihkan transfer parsial. File final tidak ditimpa.
 
 File dari direktori internal ChatGPT (`sandbox:/...`) tidak bisa dipakai sebagai URL unduhan oleh Windows. Integrasi akses bytes gambar ChatGPT diperlukan sebagai sumber pengiriman chunk, atau gunakan URL unduhan langsung. Transfer 100+ MB paling efisien lewat URL yang dapat diakses agen; mengirim Base64 dalam ratusan pemanggilan MCP memang memungkinkan tetapi lebih lambat.
+
+
+## Otomatis kirim file gambar dan dokumen dari ChatGPT (asset bridge)
+
+Tool `asset_deliver` menerima **file asli yang tersedia dalam ChatGPT** menggunakan metadata resmi MCP `_meta["openai/fileParams"]=["file"]`. ChatGPT dapat mengisi `file` dengan `{file_id,download_url,mime_type?,file_name?}`. `assets_deliver` menerima array `files` untuk 1?10 berkas sekaligus. Keduanya mengalirkan bytes langsung dari signed HTTPS URL ke agen Windows; model tidak perlu membuat Base64, menyalin `sandbox:/...`, atau menyuruh pengguna mengunduh lalu mengunggah lagi.
+
+Jika `destination` tidak ditentukan, file masuk `%USERPROFILE%\Pictures\OpenCommander\<file_name>` (nama unik saat bentrok). Gunakan `directory` untuk folder tujuan batch atau `destination` untuk nama spesifik. Opsi `wordcraft_cli_path`, `wordcraft_port`, `width_pt`, dan `alt_text` menyisipkan PNG/JPEG ke WordCraft aktif; file lain tetap disimpan di Windows. Transfer dilakukan streaming hingga 512 MiB, hash SHA-256 dihitung, dan partial transfer bisa dilanjutkan jika sumber mendukung HTTP Range dan file ID masih sama. URL yang sudah kedaluwarsa dapat diganti lewat fileParams dengan URL baru dan file ID sama.
+
+**Batas platform**: ChatGPT menentukan apakah file dari sebuah tool/generator tersedia untuk `openai/fileParams`. Plugin tidak dapat membaca file internal `sandbox:/...` hanya dari path atau ID yang tidak diberi download URL. Jika host tidak memberikan `download_url`, tool perlu dukungan API host tersebut; jangan menjanjikan transfer otomatis tanpa tes di chat aktual.
