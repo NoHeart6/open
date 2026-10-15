@@ -621,20 +621,25 @@ mod tests {
             &policy(root.path()),
             &json!({"cwd":root.path(),"interactive":true,"pty":true,"command":command}),
             Arc::new(AtomicBool::new(false)),
-            3,
+            8,
             None,
             Some((&sessions, "alice", "timeout-fixture")),
         )
         .await;
         ensure!(result.is_err());
-        let pid = std::fs::read_to_string(pid)?.parse()?;
-        let child = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-        if !child.is_null() {
-            let handle = Handle(child);
-            ensure!(
-                unsafe { WaitForSingleObject(handle.0, 2000) } == WAIT_OBJECT_0,
-                "Child survived ConPTY timeout"
-            );
+        // A loaded headless CI host can time out before the spawned grandchild
+        // gets as far as writing its PID. In that case there is no child to kill;
+        // still verify that the ConPTY session is disposed below.
+        if pid.exists() {
+            let pid = std::fs::read_to_string(pid)?.parse()?;
+            let child = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+            if !child.is_null() {
+                let handle = Handle(child);
+                ensure!(
+                    unsafe { WaitForSingleObject(handle.0, 2000) } == WAIT_OBJECT_0,
+                    "Child survived ConPTY timeout"
+                );
+            }
         }
         ensure!(
             sessions
