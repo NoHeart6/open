@@ -121,3 +121,14 @@ test('image_place accepts one image source and validates placement options',()=>
  assert.equal(schema.safeParse({destination,source_url:'https://example.com/art.png',image_base64:'abc'}).success,false);
  assert.equal(schema.safeParse({destination,source_url:'https://example.com/art.png',width_pt:900}).success,false);
 });
+
+test('media_transfer supports resumable 512 MiB transfers with bounded payload chunks',()=>{
+ const z=actions.media_transfer.schema;
+ const destination='C:\\Users\\Administrator\\Pictures\\large-image.png';
+ assert.equal(z.safeParse({op:'begin',destination,total_bytes:512*1024*1024}).success,true);
+ assert.equal(z.safeParse({op:'begin',destination,total_bytes:512*1024*1024+1}).success,false);
+ assert.equal(z.safeParse({op:'chunk',destination,transfer_id:'a'.repeat(32),offset:0,chunk_base64:'AA=='}).success,true);
+ assert.equal(z.safeParse({op:'fetch',destination,transfer_id:'a'.repeat(32),source_url:'https://example.com/large-image.png'}).success,true);
+ assert.equal(z.safeParse({op:'finish',destination,transfer_id:'a'.repeat(32)}).success,true);
+ assert.equal(z.safeParse({op:'status',destination,transfer_id:'a'.repeat(32)}).success,true);
+});

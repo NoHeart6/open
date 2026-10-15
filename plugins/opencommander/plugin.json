@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "opencommander",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Control your paired Windows computer through authenticated MCP tools with local permissions and native consent.",
   "author": {
     "name": "OpenCommander"

@@ -138,7 +138,7 @@ func category(action string, args json.RawMessage) (string, error) {
 		if a.Op == "terminate" {
 			return "SENSITIVE", nil
 		}
-	case "image_place", "wordcraft", "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
+	case "image_place", "media_transfer", "wordcraft", "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
 		return "SENSITIVE", nil
 	case "terminal_screen":
 		return "READ", nil

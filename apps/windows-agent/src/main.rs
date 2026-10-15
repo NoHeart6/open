@@ -10,6 +10,7 @@ mod execution;
 mod files;
 mod image_place;
 mod installation;
+mod media_transfer;
 mod policy;
 mod recovery;
 mod storage;
