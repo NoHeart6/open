@@ -12,6 +12,7 @@ mod file_export;
 mod files;
 mod image_place;
 mod installation;
+mod mangamotion;
 mod media_transfer;
 mod policy;
 mod recovery;

@@ -89,7 +89,7 @@ pub async fn execute(p: &Policy, action: &str, a: Value, context: Context<'_>) -
             crate::asset_bridge::run(p, &a, cancel, seconds).await
         }
         "media_transfer" => crate::media_transfer::run(p, &a, cancel, seconds).await,
-        "wordcraft" => crate::wordcraft::run(p, &a, cancel, seconds).await,
+        "mangamotion" => crate::mangamotion::run(p, &a, cancel, seconds).await,        "wordcraft" => crate::wordcraft::run(p, &a, cancel, seconds).await,
         "wordcraft_compose" => crate::wordcraft_compose::run(p, &a, cancel, seconds).await,
         "application_launch" => {
             let path = p.application(
