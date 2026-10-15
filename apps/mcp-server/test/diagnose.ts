@@ -12,8 +12,8 @@ const repo=fileURLToPath(new URL('../../..',import.meta.url));
 const config=JSON.parse(await readFile(repo+'/.runtime/railway/deployment.json','utf8')) as Record<string,string>;
 const resource=config.mcp_url!;const issuer=config.auth_url!+'/realms/opencommander';
 let input='';for await(const part of process.stdin)input+=String(part);
-const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean};input='';
-const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true;
+const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean};input='';
+const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true;
 const fixtures:{folder:string;file:string}[]=[];
 const report:{at:string;client:string;host_chatgpt:string;checks:Record<string,unknown>[];system_info?:unknown;device_id?:string;task_id?:string}={at:new Date().toISOString(),client:'independent raw HTTP JSON-RPC, not ChatGPT host',host_chatgpt:'NOT VERIFIED',checks:[]};
 const pass=(name:string,detail?:unknown)=>{report.checks.push({name,status:'PASS',detail});console.log('PASS '+name)};
@@ -52,6 +52,74 @@ try{
  stage='real Windows system_info';const submitted=await call('system_info',{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30});assert(!submitted.error);report.task_id=String(submitted.data.task_id);pass('Read-only system_info submitted',{task_id:report.task_id,request_id:submitted.requestId});
  let completed:Awaited<ReturnType<typeof call>>|undefined;for(let n=0;n<60;n++){const status=await call('task_status',{task_id:report.task_id});assert(!status.error);if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(status.data.status))){completed=status;break}await new Promise(r=>setTimeout(r,500));}assert.equal(completed?.data.status,'succeeded');const info=completed!.data.result as Record<string,unknown>;assert.equal(info.os,'Windows');assert(typeof info.cpu==='string'&&info.cpu.length>0);assert(Number(info.memory_total_bytes)>0);assert(Number(info.uptime_seconds)>0);report.system_info=info;pass('Actual Windows OS, CPU, RAM and uptime returned',{task_id:report.task_id,request_id:completed!.requestId});
   async function operate(name:string,args:Record<string,unknown>){const submitted=await call(name,{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,...args});assert(!submitted.error,'MCP '+name+' request rejected: '+JSON.stringify(submitted.data.error));for(let n=0;n<80;n++){const polled=await call('task_status',{task_id:submitted.data.task_id});assert(!polled.error);if(credentials.verify_unattended||credentials.verify_desktop||credentials.verify_all_applications||credentials.verify_usability)assert.notEqual(polled.data.status,'approval_pending','Trusted owner task unexpectedly requested a click');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(polled.data.status)))return {...polled.data,_content:polled.content};await new Promise(r=>setTimeout(r,250))}throw new Error('Profile access task did not finish')}
+ if(credentials.verify_wordcraft){
+  stage='production WordCraft native MCP integration';
+  const cli=String((info.workspace as Record<string,unknown>).user_profile)+'\\Documents\\WordCraft\\wordcraft-0.7.0-windows-x64-portable\\wordcraft-cli.exe';
+  const read=await operate('wordcraft',{cli_path:cli,port:7981,tool:'get_text',arguments:{}});
+  assert.equal(read.status,'succeeded','WordCraft MCP read failed: '+String(read.error??''));
+  const body=(read.result as Record<string,unknown>).result as Record<string,unknown>;
+  assert.equal((read.result as Record<string,unknown>).via,'wordcraft-native-mcp');
+  assert(String(body.text).includes('Dokumen WordCraft melalui MCP') || String(body.text).includes('WORDCRAFT_OPENCOMMANDER_V030_E2E'));
+  pass('WordCraft MCP proxy reads the real running Windows editor through Railway');
+  const listed=await operate('wordcraft',{cli_path:cli,port:7981,tool:'list_commands',arguments:{}});
+  assert.equal(listed.status,'succeeded');
+  const commands=(listed.result as Record<string,unknown>).result as Array<{id:string}>;
+  assert(Array.isArray(commands)&&commands.length>=500);
+  assert(commands.some(c=>c.id==='insert.table'));
+  pass('WordCraft exposes the complete editor command registry through the production MCP bridge',{commands:commands.length});
+  const created=await operate('wordcraft',{cli_path:cli,port:7981,tool:'new_document',arguments:{template:'blank'}});
+  assert.equal(created.status,'succeeded','WordCraft new_document failed');
+  const typed=await operate('wordcraft',{cli_path:cli,port:7981,tool:'type_text',arguments:{text:'WORDCRAFT_OPENCOMMANDER_V030_E2E'+String.fromCharCode(10)+'Created and saved through Railway MCP.',paragraphs:true}});
+  assert.equal(typed.status,'succeeded','WordCraft type_text failed');
+  const outpath=String((info.workspace as Record<string,unknown>).user_profile)+'\\Documents\\WordCraft\\MCP Documents\\wordcraft_proxy_v030_e2e.docx';
+  const saved=await operate('wordcraft',{cli_path:cli,port:7981,tool:'save_document',arguments:{path:outpath}});
+  assert.equal(saved.status,'succeeded','WordCraft save_document failed');
+  assert.equal(((saved.result as Record<string,unknown>).result as Record<string,unknown>).saved,true);
+  const verified=await operate('wordcraft',{cli_path:cli,port:7981,tool:'get_text',arguments:{}});
+  assert.equal(verified.status,'succeeded');
+  const verifiedText=((verified.result as Record<string,unknown>).result as Record<string,unknown>).text;
+  assert(String(verifiedText).includes('WORDCRAFT_OPENCOMMANDER_V030_E2E'));
+  pass('WordCraft MCP bridge creates, types, saves and reads back a DOCX through production Railway',{path:outpath});
+  const table=await operate('wordcraft',{cli_path:cli,port:7981,tool:'execute',arguments:{command:'insert.table',params:{rows:2,cols:2}}});
+  assert.equal(table.status,'succeeded','Native WordCraft insert.table failed: '+String(table.error??''));
+  pass('WordCraft executes table insertion through the full native command registry');
+  const render=await operate('wordcraft',{cli_path:cli,port:7981,tool:'render_page',arguments:{page:1,scale:0.5}});
+  assert.equal(render.status,'succeeded','Native WordCraft page render failed: '+String(render.error??''));
+  const preview=(render.result as Record<string,unknown>).image_data as Record<string,unknown>;
+  assert(['image/png','image/jpeg'].includes(String(preview.mime_type)));
+  assert(Buffer.from(String(preview.base64),'base64').length>1000);
+  pass('WordCraft renders the live document to visual image_data through production Railway',{bytes:Buffer.from(String(preview.base64),'base64').length});
+  const snap=await operate('wordcraft',{cli_path:cli,port:7981,tool:'screenshot',arguments:{}});
+  assert.equal(snap.status,'succeeded','Native WordCraft screenshot failed: '+String(snap.error??''));
+  const shot=(snap.result as Record<string,unknown>).image_data as Record<string,unknown>;
+  assert(['image/png','image/jpeg'].includes(String(shot.mime_type)));
+  assert(Buffer.from(String(shot.base64),'base64').length>1000);
+  pass('WordCraft captures its own desktop window through production Railway',{bytes:Buffer.from(String(shot.base64),'base64').length});
+
+ }
+ if(credentials.verify_tui){
+  stage='production ConPTY and program exit semantics';
+  const cwd=String((info.workspace as Record<string,unknown>).user_profile);
+  async function done(id:unknown){for(let n=0;n<100;n++){const response=await call('task_status',{task_id:id});assert(!response.error);assert.notEqual(response.data.status,'approval_pending');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(response.data.status)))return response.data;await new Promise(resolve=>setTimeout(resolve,200))}throw new Error('ConPTY fixture did not finish')}
+  for(const expected of [false,true]){
+   const choice=await operate('terminal_execute',{cwd,shell:'cmd',command:'choice /C YN /D Y /T 0',...expected?{success_exit_codes:[1,2]}:{}});
+   assert.equal(choice.status,'succeeded');const result=choice.result as Record<string,unknown>;assert.equal(result.exit_code,1);assert.equal(result.execution_succeeded,true);assert.equal(result.program_succeeded,expected);pass(expected?'choice=1 recognized as expected program outcome':'choice=1 remains a completed execution with separately reported program outcome',{task_id:choice.task_id,exit_code:1});
+  }
+  const tui=await call('terminal_execute',{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:60,cwd,interactive:true,pty:true,command:'$e=[char]27;[Console]::Write("$e[2J$e[HREADY_TUI");$k=[Console]::ReadKey($true);[Console]::Write("$e[2;1HKEY:$($k.Key)");$line=[Console]::ReadLine();[Console]::Write("$e[3;1HTEXT:$line");[Console]::ReadKey($true)|Out-Null;[Console]::Write("$e[4;1HSIZE:$([Console]::WindowWidth)x$([Console]::WindowHeight)");[Console]::ReadKey($true)|Out-Null;[Console]::Write("$e[5;1HDONE_TUI");exit 3'});assert(!tui.error);
+  async function screen(marker:string){for(let n=0;n<80;n++){const response=await operate('terminal_screen',{target_task_id:tui.data.task_id});if(response.status==='succeeded'&&String((response.result as Record<string,unknown>).text).includes(marker))return response.result as Record<string,unknown>;await new Promise(resolve=>setTimeout(resolve,150))}throw new Error('ConPTY screen marker unavailable: '+marker)}
+  try{
+   const initial=await screen('READY_TUI');assert.equal(initial.cols,80);assert.equal(initial.rows,24);pass('ConPTY produces a rendered live screen',{task_id:tui.data.task_id,cols:80,rows:24});
+   const key=await operate('terminal_input',{target_task_id:tui.data.task_id,keys:['UP']});assert.equal(key.status,'succeeded');await screen('KEY:UpArrow');pass('ConPTY arrow key changes actual console application state');
+   await operate('terminal_input',{target_task_id:tui.data.task_id,text:'世界',keys:['ENTER']});await screen('TEXT:世界');pass('ConPTY UTF-8 Unicode reaches PowerShell console input');
+   const resize=await operate('terminal_input',{target_task_id:tui.data.task_id,cols:120,rows:40});assert.equal(resize.status,'succeeded');await operate('terminal_input',{target_task_id:tui.data.task_id,keys:['ENTER']});const resized=await screen('SIZE:120x40');assert.equal(resized.cols,120);assert.equal(resized.rows,40);pass('Resize changes ConPTY dimensions and actual application geometry',{cols:120,rows:40});
+   await operate('terminal_input',{target_task_id:tui.data.task_id,keys:['ENTER']});const completed=await done(tui.data.task_id);assert.equal(completed.status,'succeeded');const result=completed.result as Record<string,unknown>;assert.equal(result.pty,true);assert.equal(result.exit_code,3);assert.equal(result.program_succeeded,false);assert(String(result.stdout).includes('DONE_TUI'));assert(result.screen);pass('ConPTY exits cleanly with merged VT output, final screen and separate program outcome',{task_id:tui.data.task_id,exit_code:3});
+   const output=await call('task_output',{task_id:tui.data.task_id});assert(!output.error);assert(JSON.stringify(output.data.chunks).includes('READY_TUI'));pass('ConPTY raw VT output survives the durable streaming path');
+   const ended=await operate('terminal_screen',{target_task_id:tui.data.task_id});assert.equal(ended.status,'failed');pass('Ended ConPTY sessions reject live screen requests');
+  }finally{await call('task_cancel',{task_id:tui.data.task_id});await done(tui.data.task_id);}
+  const cancel=await call('terminal_execute',{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,cwd,interactive:true,pty:true,command:"[Console]::Write('CANCEL_READY');Start-Sleep -Seconds 20"});assert(!cancel.error);
+  try{for(let n=0;n<60;n++){const output=await call('task_output',{task_id:cancel.data.task_id});if(JSON.stringify(output.data.chunks).includes('CANCEL_READY'))break;assert(n<59,'Cancellation fixture never became ready');await new Promise(resolve=>setTimeout(resolve,150));}}
+  finally{await call('task_cancel',{task_id:cancel.data.task_id});const cancelled=await done(cancel.data.task_id);assert.equal(cancelled.status,'cancelled');}pass('Cancellation closes the running ConPTY session',{task_id:cancel.data.task_id});
+ }
  if(credentials.verify_terminal){
   stage='terminal while a long-running server is active';
   assert.equal(info.agent_version,/^version = "([^"]+)"$/m.exec(await readFile(repo+'/apps/windows-agent/Cargo.toml','utf8'))?.[1]);assert.equal((info.workspace as {max_concurrent_terminals:number}).max_concurrent_terminals,4);
@@ -206,5 +274,5 @@ try{
 }catch(error){report.checks.push({name:stage,status:'FAIL',detail:error instanceof Error?error.message:'Diagnostic check failed'});process.exitCode=1;console.error('FAIL '+stage+': '+(error instanceof Error?error.message:'Diagnostic check failed'));}finally{
  for(const fixture of fixtures){await unlink(fixture.file).catch(()=>{});await unlink(join(fixture.folder,'mouse-events.txt')).catch(()=>{});await rmdir(fixture.folder).catch(()=>{});}
  if(tokens&&credentials.client_secret&&revokeEndpoint){try{const r=await fetch(revokeEndpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:'opencommander-chatgpt',client_secret:credentials.client_secret,token:tokens.refresh_token,token_type_hint:'refresh_token'})});assert.equal(r.status,200);pass('Diagnostic refresh token revoked');}catch{report.checks.push({name:'Diagnostic refresh token cleanup',status:'FAIL'});process.exitCode=1;}}
- await writeFile(repo+'/artifacts/'+(credentials.verify_terminal?'terminal-results.json':credentials.verify_screenshot?'screenshot-delivery-results.json':credentials.verify_usability?'usability-results.json':credentials.verify_all_applications?'all-applications-results.json':credentials.verify_desktop?'desktop-fix-results.json':credentials.verify_unattended?'unattended-access-results.json':credentials.verify_profile_access?'profile-access-results.json':'chatgpt-integration-diagnostics.json'),JSON.stringify(report,null,2));
+ await writeFile(repo+'/artifacts/'+(credentials.verify_wordcraft?'wordcraft-results.json':credentials.verify_tui?'tui-results.json':credentials.verify_terminal?'terminal-results.json':credentials.verify_screenshot?'screenshot-delivery-results.json':credentials.verify_usability?'usability-results.json':credentials.verify_all_applications?'all-applications-results.json':credentials.verify_desktop?'desktop-fix-results.json':credentials.verify_unattended?'unattended-access-results.json':credentials.verify_profile_access?'profile-access-results.json':'chatgpt-integration-diagnostics.json'),JSON.stringify(report,null,2));
 }

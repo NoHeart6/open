@@ -212,6 +212,36 @@ func TestTerminalInputOwnershipScopeAndIdempotency(t *testing.T) {
 	if response.StatusCode != 403 {
 		t.Fatal(response.StatusCode)
 	}
+	for _, args := range []map[string]any{
+		{"target_task_id": target["task_id"], "keys": []string{"UP", "ENTER"}},
+		{"target_task_id": target["task_id"], "cols": 120, "rows": 40},
+	} {
+		input["idempotency_key"] = token(18)
+		input["args"] = args
+		if code, _ := request(t, s, h, "POST", "/api/tasks", "alice", input); code != 202 {
+			t.Fatal(code)
+		}
+	}
+	for _, args := range []map[string]any{
+		{"target_task_id": target["task_id"], "cols": 120},
+		{"target_task_id": target["task_id"], "cols": 0, "rows": 40},
+		{"target_task_id": target["task_id"], "cols": 120, "rows": 101},
+	} {
+		input["idempotency_key"] = token(18)
+		input["args"] = args
+		if code, _ := request(t, s, h, "POST", "/api/tasks", "alice", input); code != 400 {
+			t.Fatal(code)
+		}
+	}
+	input["action"] = "terminal_screen"
+	input["idempotency_key"] = token(18)
+	input["args"] = map[string]any{"target_task_id": target["task_id"]}
+	if code, _ := request(t, s, h, "POST", "/api/tasks", "alice", input); code != 202 {
+		t.Fatal(code)
+	}
+	if code, _ := request(t, s, h, "POST", "/api/tasks", "mallory", input); code != 404 {
+		t.Fatal(code)
+	}
 }
 func TestRestartDoesNotReplay(t *testing.T) {
 	s, h := fixture(t)

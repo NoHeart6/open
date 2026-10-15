@@ -3,6 +3,8 @@
 mod automation;
 mod batch;
 mod clipboard;
+#[cfg(windows)]
+mod conpty;
 mod desktop;
 mod execution;
 mod files;
@@ -14,6 +16,7 @@ mod system;
 mod terminal_input;
 mod ui;
 mod updater;
+mod wordcraft;
 
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -362,7 +365,7 @@ async fn run_task(t: Task, flag: Arc<AtomicBool>, runtime: TaskRuntime) -> Resul
         let remaining = t.deadline.saturating_sub(now());
         ensure!(remaining > 0, "Deadline expired");
         let lane = if t.action == "terminal_execute" { &scheduler.terminals } else { &scheduler.desktop };
-        let _permit = if t.action == "terminal_input" { None } else {
+        let _permit = if matches!(t.action.as_str(), "terminal_input" | "terminal_screen") { None } else {
             Some(tokio::time::timeout(Duration::from_secs(remaining), lane.acquire()).await.context("Execution slot unavailable before task deadline")??)
         };
         ensure!(
@@ -431,9 +434,6 @@ async fn run_task(t: Task, flag: Arc<AtomicBool>, runtime: TaskRuntime) -> Resul
             } else if value["completed"] == false {
                 record.status = "failed".into();
                 record.error = value["error"].as_str().unwrap_or("Operation failed").into();
-            } else if t.action == "terminal_execute" && value["exit_code"].as_i64() != Some(0) {
-                record.status = "failed".into();
-                record.error = format!("Command exited with code {}", value["exit_code"]);
             } else {
                 record.status = "succeeded".into();
             }
@@ -986,6 +986,45 @@ mod tests {
             concurrent && record.status == "succeeded",
             "Second command must finish before the server"
         );
+        for (id, args, code, program_succeeded) in [
+            (
+                "choice-result",
+                json!({"cwd":workspace,"shell":"cmd","command":"choice /C YN /D Y /T 0"}),
+                1,
+                false,
+            ),
+            (
+                "choice-expected",
+                json!({"cwd":workspace,"shell":"cmd","command":"choice /C YN /D Y /T 0","success_exit_codes":[1,2]}),
+                1,
+                true,
+            ),
+            (
+                "unexpected-exit",
+                json!({"cwd":workspace,"shell":"cmd","command":"exit /b 7"}),
+                7,
+                false,
+            ),
+        ] {
+            let mut example = task(id, String::new(), 5);
+            example.args = args;
+            run_task(example, Arc::new(AtomicBool::new(false)), runtime()).await?;
+            let record: Record =
+                serde_json::from_slice(&storage::load(&journal_path(&state, id)?)?)?;
+            ensure!(
+                record.status == "succeeded"
+                    && record.error.is_empty()
+                    && record.result["exit_code"] == code
+                    && record.result["program_succeeded"] == program_succeeded,
+                "Process completion was confused with its exit code"
+            );
+        }
+        let mut rejected = task("launch-rejected", String::new(), 5);
+        rejected.args = json!({"cwd":workspace,"shell":"invalid","command":"echo never"});
+        run_task(rejected, Arc::new(AtomicBool::new(false)), runtime()).await?;
+        let record: Record =
+            serde_json::from_slice(&storage::load(&journal_path(&state, "launch-rejected")?)?)?;
+        ensure!(record.status == "failed");
         Ok(())
     }
     #[test]

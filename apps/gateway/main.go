@@ -463,15 +463,24 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request, c *Claims) {
 		fail(w, 404, "device not found")
 		return
 	}
-	if a.Action == "terminal_input" {
+	if a.Action == "terminal_input" || a.Action == "terminal_screen" {
 		var input struct {
-			Target string `json:"target_task_id"`
-			Text   string `json:"text"`
-			EOF    bool   `json:"eof"`
+			Target string   `json:"target_task_id"`
+			Text   string   `json:"text"`
+			EOF    bool     `json:"eof"`
+			Keys   []string `json:"keys"`
+			Cols   *int     `json:"cols"`
+			Rows   *int     `json:"rows"`
 		}
-		if json.Unmarshal(a.Args, &input) != nil || len(input.Target) < 8 || len(input.Target) > 128 || len(input.Text) > 16384 || (input.Text == "" && !input.EOF) {
+		if json.Unmarshal(a.Args, &input) != nil || len(input.Target) < 8 || len(input.Target) > 128 || len(input.Text) > 16384 || len(input.Keys) > 64 || ((input.Cols == nil) != (input.Rows == nil)) || (input.Cols != nil && (*input.Cols < 20 || *input.Cols > 240 || *input.Rows < 5 || *input.Rows > 100)) || (a.Action == "terminal_input" && input.Text == "" && !input.EOF && len(input.Keys) == 0 && input.Cols == nil) {
 			fail(w, 400, "invalid stdin request")
 			return
+		}
+		for _, key := range input.Keys {
+			if len(key) > 16 {
+				fail(w, 400, "invalid terminal key")
+				return
+			}
 		}
 		target, err := s.task(c.Subject, input.Target)
 		if err != nil || target.DeviceID != a.DeviceID || target.Action != "terminal_execute" {

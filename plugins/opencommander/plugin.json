@@ -1,9 +1,11 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "opencommander",
-  "version": "0.2.8",
+  "version": "0.3.1",
   "description": "Control your paired Windows computer through authenticated MCP tools with local permissions and native consent.",
-  "author": { "name": "OpenCommander" },
+  "author": {
+    "name": "OpenCommander"
+  },
   "extensions": {
     "com.openai": {
       "interface": {
@@ -12,7 +14,10 @@
         "longDescription": "Baca spesifikasi, file, proses dan desktop Windows milikmu. Operasi sensitif memerlukan persetujuan lokal di komputer. Pairing dan kontrol menggunakan OAuth serta identitas perangkat.",
         "developerName": "OpenCommander",
         "category": "Productivity",
-        "capabilities": ["Read", "Write"],
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
         "defaultPrompt": "Gunakan OpenCommander untuk memeriksa spesifikasi komputer Windows saya."
       }
     }

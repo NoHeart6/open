@@ -138,8 +138,10 @@ func category(action string, args json.RawMessage) (string, error) {
 		if a.Op == "terminate" {
 			return "SENSITIVE", nil
 		}
-	case "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
+	case "wordcraft", "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
 		return "SENSITIVE", nil
+	case "terminal_screen":
+		return "READ", nil
 	}
 	return "", fmt.Errorf("unsupported action or operation")
 }

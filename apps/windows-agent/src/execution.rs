@@ -83,6 +83,8 @@ pub async fn execute(p: &Policy, action: &str, a: Value, context: Context<'_>) -
             .await
         }
         "terminal_input" => sessions.send(owner, &a).await,
+        "terminal_screen" => sessions.screen(owner, &a),
+        "wordcraft" => crate::wordcraft::run(p, &a, cancel, seconds).await,
         "application_launch" => {
             let path = p.application(
                 a["path"]
@@ -214,30 +216,35 @@ async fn drain<R: tokio::io::AsyncRead + Unpin>(
         let available = 65536usize.saturating_sub(result.len());
         result.extend_from_slice(&buffer[..n.min(available)]);
         truncated |= n > available;
-        if let Some(ref output) = output {
-            let seq = output.sequence.fetch_add(1, Ordering::SeqCst) + 1;
-            if seq <= 512 {
-                let chunk = json!({"type":"output","task_id":output.task_id,"seq":seq,"stream":stream,"text":String::from_utf8_lossy(&buffer[..n])});
-                let persist = output_path(&output.state, &output.task_id, seq).and_then(|path| {
-                    crate::storage::save_bounded(
-                        &path,
-                        &serde_json::to_vec(&chunk)?,
-                        4096,
-                        32 * 1024 * 1024,
-                    )
-                });
-                persist.map_err(std::io::Error::other)?;
-                // Durable chunks are retransmitted after reconnect if the writer is full.
-                let _ = output.sender.try_send(chunk);
-            } else {
-                truncated = true;
-            }
-        }
+        truncated |= !publish_output(
+            output.as_ref(),
+            stream,
+            String::from_utf8_lossy(&buffer[..n]).into_owned(),
+        )
+        .map_err(std::io::Error::other)?;
     }
     Ok((result, truncated))
 }
+pub(crate) fn publish_output(output: Option<&Output>, stream: &str, text: String) -> Result<bool> {
+    if let Some(output) = output {
+        let seq = output.sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        if seq > 512 {
+            return Ok(false);
+        }
+        let chunk =
+            json!({"type":"output","task_id":output.task_id,"seq":seq,"stream":stream,"text":text});
+        crate::storage::save_bounded(
+            &output_path(&output.state, &output.task_id, seq)?,
+            &serde_json::to_vec(&chunk)?,
+            4096,
+            32 * 1024 * 1024,
+        )?;
+        let _ = output.sender.try_send(chunk);
+    }
+    Ok(true)
+}
 #[cfg(windows)]
-struct Job(windows_sys::Win32::Foundation::HANDLE);
+pub(crate) struct Job(windows_sys::Win32::Foundation::HANDLE);
 #[cfg(windows)]
 unsafe impl Send for Job {}
 #[cfg(windows)]
@@ -249,7 +256,7 @@ impl Drop for Job {
     }
 }
 #[cfg(windows)]
-fn job(pid: u32) -> Result<Job> {
+pub(crate) fn job(pid: u32) -> Result<Job> {
     use windows_sys::Win32::{
         Foundation::CloseHandle,
         System::{JobObjects::*, Threading::*},
@@ -333,6 +340,7 @@ pub async fn terminal_with_output(
     output: Option<Output>,
     session: Option<(&crate::terminal_input::Sessions, &str, &str)>,
 ) -> Result<Value> {
+    validate_exit_codes(a)?;
     let interactive = a["interactive"].as_bool().unwrap_or(false);
     let initial = a["stdin"].as_str();
     ensure!(
@@ -367,8 +375,14 @@ pub async fn terminal_with_output(
             let executable = std::path::PathBuf::from("powershell.exe");
             let mut c = Command::new(executable);
             #[cfg(windows)]
+            let input_encoding = if a["pty"].as_bool() == Some(true) {
+                "[Text.UnicodeEncoding]::new($false,$false)"
+            } else {
+                "[Text.UTF8Encoding]::new($false)"
+            };
+            #[cfg(windows)]
             let script = format!(
-                "[Console]::InputEncoding=[Text.UTF8Encoding]::new($false);[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Import-Module -Name (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop\n{text}"
+                "[Console]::InputEncoding={input_encoding};[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Import-Module -Name (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop\n{text}"
             );
             #[cfg(not(windows))]
             let script = text.to_owned();
@@ -434,6 +448,22 @@ pub async fn terminal_with_output(
             }),
         );
         command.env("PSModulePath", std::env::join_paths(paths)?);
+    }
+    command.current_dir(&cwd);
+    if a["pty"].as_bool().unwrap_or(false) {
+        ensure!(interactive, "pty=true requires interactive=true");
+        #[cfg(windows)]
+        return crate::conpty::run(
+            command.as_std(),
+            a,
+            cancel,
+            seconds,
+            output,
+            session.unwrap(),
+        )
+        .await;
+        #[cfg(not(windows))]
+        bail!("ConPTY requires Windows");
     }
     command
         .current_dir(cwd)
@@ -533,9 +563,45 @@ pub async fn terminal_with_output(
     drop(_job);
     let (stdout, out_truncated) = out.await??;
     let (stderr, err_truncated) = err.await??;
-    Ok(
-        json!({"exit_code":status.code(),"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"output_truncated":out_truncated||err_truncated,"streaming":output.is_some(),"interactive":interactive,"stdin_mode":if interactive||initial.is_some(){"pipe"}else{"closed"},"output_last_sequence":output.map(|o|o.sequence.load(Ordering::SeqCst).min(512))}),
-    )
+    let mut result = json!({"exit_code":status.code(),"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"output_truncated":out_truncated||err_truncated,"streaming":output.is_some(),"interactive":interactive,"pty":false,"stdin_mode":if interactive||initial.is_some(){"pipe"}else{"closed"},"output_last_sequence":output.map(|o|o.sequence.load(Ordering::SeqCst).min(512))});
+    describe_exit(&mut result, a)?;
+    Ok(result)
+}
+pub(crate) fn describe_exit(result: &mut Value, args: &Value) -> Result<()> {
+    validate_exit_codes(args)?;
+    let codes = args["success_exit_codes"].as_array();
+    ensure!(
+        codes.is_none_or(|codes| !codes.is_empty()
+            && codes.len() <= 32
+            && codes.iter().all(|code| code.as_i64().is_some())),
+        "Invalid success exit codes"
+    );
+    let success = if let Some(codes) = codes {
+        codes.iter().any(|code| code == &result["exit_code"])
+    } else {
+        result["exit_code"] == 0
+    };
+    result["execution_succeeded"] = json!(true);
+    result["program_succeeded"] = json!(success);
+    result["program_outcome"] = json!(if success {
+        "expected_exit"
+    } else {
+        "unexpected_exit"
+    });
+    Ok(())
+}
+fn validate_exit_codes(args: &Value) -> Result<()> {
+    if let Some(codes) = args.get("success_exit_codes") {
+        ensure!(
+            codes.as_array().is_some_and(|codes| !codes.is_empty()
+                && codes.len() <= 32
+                && codes.iter().all(|code| code
+                    .as_i64()
+                    .is_some_and(|code| (-2147483648..=4294967295).contains(&code)))),
+            "Invalid success exit codes"
+        );
+    }
+    Ok(())
 }
 #[cfg(all(test, windows))]
 mod tests {
