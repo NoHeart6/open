@@ -162,59 +162,44 @@ pub async fn run(
                     .context("Table first row required")?
                     .len();
                 ensure!((1..=12).contains(&cols), "Table columns 1..12");
-                let mut data = Vec::new();
+                command(
+                    p,
+                    cli,
+                    port,
+                    "insert.table",
+                    json!({"rows":rows.len(),"cols":cols}),
+                    c.clone(),
+                    seconds,
+                )
+                .await?;
+                let count = rows.len() * cols;
+                let mut index = 0;
                 for r in rows {
                     let cells = r.as_array().context("Table row must be an array")?;
                     ensure!(cells.len() == cols, "Table must be rectangular");
-                    data.push(
-                        cells
-                            .iter()
-                            .map(|c| c.as_str().unwrap_or("").replace(['\t', '\n'], " "))
-                            .collect::<Vec<_>>()
-                            .join("\t"),
-                    );
+                    for cell in cells {
+                        let value = cell.as_str().context("Table cells must be strings")?;
+                        ensure!(value.len() <= 2000, "Table cell exceeds 2,000 characters");
+                        if !value.is_empty() {
+                            command(
+                                p,
+                                cli,
+                                port,
+                                "text.insert",
+                                json!({"text":value}),
+                                c.clone(),
+                                seconds,
+                            )
+                            .await?;
+                        }
+                        index += 1;
+                        if index < count {
+                            command(p, cli, port, "text.tab", json!({}), c.clone(), seconds)
+                                .await?;
+                        }
+                    }
                 }
-                let t = data.join("\n");
-                command(
-                    p,
-                    cli,
-                    port,
-                    "text.insert",
-                    json!({"text":t}),
-                    c.clone(),
-                    seconds,
-                )
-                .await?;
-                command(
-                    p,
-                    cli,
-                    port,
-                    "select.text",
-                    json!({"text":t}),
-                    c.clone(),
-                    seconds,
-                )
-                .await?;
-                command(
-                    p,
-                    cli,
-                    port,
-                    "table.fromText",
-                    json!({"separator":"tab"}),
-                    c.clone(),
-                    seconds,
-                )
-                .await?;
-                command(
-                    p,
-                    cli,
-                    port,
-                    "text.newParagraph",
-                    json!({}),
-                    c.clone(),
-                    seconds,
-                )
-                .await?;
+                command(p, cli, port, "caret.docEnd", json!({}), c.clone(), seconds).await?;
             }
             _ => bail!("Unsupported document block type {kind} at index {i}"),
         }

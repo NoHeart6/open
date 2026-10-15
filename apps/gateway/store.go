@@ -93,7 +93,7 @@ func (s *Server) audit(owner, device, task, event string) error {
 
 func category(action string, args json.RawMessage) (string, error) {
 	switch action {
-	case "system_info", "system_inventory", "file_read", "file_search", "desktop_windows", "desktop_screenshot", "desktop_inspect":
+	case "system_info", "system_inventory", "file_export", "file_read", "file_search", "desktop_windows", "desktop_screenshot", "desktop_inspect":
 		return "READ", nil
 	case "file_write", "file_batch", "file_undo":
 		return "MODIFY", nil

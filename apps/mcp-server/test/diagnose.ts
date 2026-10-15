@@ -96,6 +96,15 @@ try{
   assert.equal(visual.status,'succeeded',String(visual.error));
   assert((visual.result as Record<string,unknown>).before!==undefined);
   pass('visual_agent observes actual Windows desktop window metadata through MCP');
+  const windows=(((visual.result as Record<string,unknown>).before as Record<string,unknown>).windows as {hwnd:number;title:string}[]);
+  const wordcraftWindow=windows.find(w=>w.title.includes('WordCraft'));
+  if(wordcraftWindow){
+    const focused=await operate('visual_agent',{op:'act',hwnd:wordcraftWindow.hwnd,action:'focus',expect_text:'WordCraft'});
+    assert.equal(focused.status,'succeeded',String(focused.error));
+    assert.equal((focused.result as Record<string,unknown>).verification_state,'verified');
+    pass('visual_agent focuses WordCraft and verifies real post-action UI tree');
+  }
+
 
   const cli=join(user,'Documents','WordCraft','wordcraft-0.7.0-windows-x64-portable','wordcraft-cli.exe');
   const output=join(user,'Documents','WordCraft','MCP Documents','OC_050_COMPOSE_'+key+'.docx');
