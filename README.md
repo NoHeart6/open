@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/NoHeart6/open/releases/latest"><img src="https://img.shields.io/github/v/release/NoHeart6/open?style=flat-square&color=089bc1" alt="Rilis terbaru"></a>
+  <a href="https://github.com/NoHeart6/open/releases/latest"><img src="https://img.shields.io/badge/release-v0.5.0-089bc1?style=flat-square" alt="Rilis 0.5.0"></a>
   <img src="https://img.shields.io/badge/Windows-x64-1679be?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/agent-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Agent Rust">
   <img src="https://img.shields.io/badge/protocol-MCP-16b8d4?style=flat-square" alt="Model Context Protocol">
