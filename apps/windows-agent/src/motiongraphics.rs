@@ -1,4 +1,4 @@
-//! Structured MangaMotion CLI bridge. The caller supplies declarative scene edits,
+//! Structured Motion Graphics CLI bridge. The caller supplies declarative scene edits,
 //! never arbitrary PowerShell or executable commands. Run via existing MCP task queue.
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -21,7 +21,7 @@ const OPERATIONS: &[&str] = &[
     "render_video",
     "compile_motion",
     "import_image",
-    "import_psd",
+    "set_text",
 ];
 
 pub async fn run(
@@ -33,19 +33,14 @@ pub async fn run(
     let op = args
         .get("op")
         .and_then(Value::as_str)
-        .context("Missing MangaMotion operation")?;
+        .context("Missing Motion Graphics operation")?;
     ensure!(
         OPERATIONS.contains(&op),
-        "Unsupported MangaMotion operation"
+        "Unsupported Motion Graphics operation"
     );
     let writes = matches!(
         op,
-        "patch"
-            | "render_still"
-            | "render_video"
-            | "compile_motion"
-            | "import_image"
-            | "import_psd"
+        "patch" | "render_still" | "render_video" | "compile_motion" | "import_image" | "set_text"
     );
     if writes {
         ensure!(policy.allow_modify, "Modification permission is disabled");
@@ -53,17 +48,17 @@ pub async fn run(
     let raw_root = args
         .get("project_root")
         .and_then(Value::as_str)
-        .context("Missing MangaMotion project_root")?;
+        .context("Missing Motion Graphics project_root")?;
     let root = policy.path(raw_root)?;
     ensure!(
         root.is_dir(),
-        "MangaMotion project root must be a directory"
+        "Motion Graphics project root must be a directory"
     );
     let cli: PathBuf = root.join("scripts").join("mcp-control.mjs");
     let cli = policy.path(cli.to_str().context("Invalid CLI path")?)?;
     ensure!(
         cli.is_file(),
-        "MangaMotion CLI not found in selected project root"
+        "Motion Graphics CLI not found in selected project root"
     );
     ensure!(
         std::fs::metadata(&cli)?.len() < 256 * 1024,
@@ -71,11 +66,14 @@ pub async fn run(
     );
     let mut request = args
         .as_object()
-        .context("MangaMotion arguments must be an object")?
+        .context("Motion Graphics arguments must be an object")?
         .clone();
     request.remove("project_root");
     let payload = serde_json::to_vec(&Value::Object(request))?;
-    ensure!(payload.len() <= 65536, "MangaMotion request exceeds 64KiB");
+    ensure!(
+        payload.len() <= 65536,
+        "Motion Graphics request exceeds 64KiB"
+    );
     ensure!(!cancelled.load(Ordering::Relaxed), "Operation cancelled");
     let mut child = Command::new("node.exe")
         .arg("--experimental-strip-types")
@@ -86,7 +84,7 @@ pub async fn run(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .context("Start MangaMotion control CLI")?;
+        .context("Start Motion Graphics control CLI")?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&payload).await?;
     }
@@ -95,21 +93,21 @@ pub async fn run(
         child.wait_with_output(),
     )
     .await
-    .context("MangaMotion CLI timed out")??;
+    .context("Motion Graphics CLI timed out")??;
     ensure!(!cancelled.load(Ordering::Relaxed), "Operation cancelled");
     ensure!(
         output.stdout.len() <= 256 * 1024 && output.stderr.len() <= 256 * 1024,
-        "MangaMotion output too large"
+        "Motion Graphics output too large"
     );
     let result: Value = serde_json::from_slice(&output.stdout).with_context(|| {
         format!(
-            "MangaMotion invalid response: {}",
+            "Motion Graphics invalid response: {}",
             String::from_utf8_lossy(&output.stderr)
         )
     })?;
     if !output.status.success() || result["ok"] != true {
         bail!(
-            "MangaMotion: {}",
+            "Motion Graphics: {}",
             result
                 .get("error")
                 .and_then(Value::as_str)

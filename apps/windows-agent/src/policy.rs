@@ -208,13 +208,13 @@ pub fn category(action: &str, args: &Value) -> Result<&'static str> {
             Ok("READ")
         }
         "file_write" | "file_batch" | "file_undo" => Ok("MODIFY"),
-        "mangamotion" => match args["op"].as_str() {
+        "motiongraphics" => match args["op"].as_str() {
             Some("list" | "inspect") => Ok("READ"),
             Some(
                 "patch" | "render_still" | "render_video" | "compile_motion" | "import_image"
-                | "import_psd",
+                | "set_text",
             ) => Ok("SENSITIVE"),
-            _ => bail!("Unsupported MangaMotion operation"),
+            _ => bail!("Unsupported Motion Graphics operation"),
         },
         "file_recovery" => match args["op"].as_str() {
             Some("list") => Ok("READ"),

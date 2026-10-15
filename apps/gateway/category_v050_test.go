@@ -26,17 +26,17 @@ func TestMangaMotionTaskCategories(t *testing.T) {
 		{"patch", "SENSITIVE"},
 		{"compile_motion", "SENSITIVE"},
 		{"import_image", "SENSITIVE"},
-		{"import_psd", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
+		{"set_text", "SENSITIVE"}, {"render_still", "SENSITIVE"}, {"render_video", "SENSITIVE"},
 	}
 	for _, c := range cases {
 		arg, _ := json.Marshal(map[string]string{"op": c.op})
-		got, err := category("mangamotion", arg)
+		got, err := category("motiongraphics", arg)
 		if err != nil || got != c.expected {
 			t.Errorf("mangamotion %s: got %s, err=%v, expected %s", c.op, got, err, c.expected)
 		}
 	}
 	for _, payload := range []string{`{"op":"arbitrary_shell"}`, `{`, `{}`} {
-		if got, err := category("mangamotion", json.RawMessage(payload)); err == nil {
+		if got, err := category("motiongraphics", json.RawMessage(payload)); err == nil {
 			t.Errorf("unsupported task accepted: %q (%s)", payload, got)
 		}
 	}
