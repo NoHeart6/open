@@ -1,4 +1,4 @@
-param([switch]$CodexOAuth,[switch]$ProfileAccess,[switch]$Unattended,[switch]$Desktop,[switch]$AllApplications,[switch]$Usability,[switch]$Screenshot,[switch]$Terminal,[switch]$Tui,[switch]$Wordcraft,[switch]$Image,[switch]$Media,[switch]$MediaUrl,[switch]$Assets)
+param([switch]$CodexOAuth,[switch]$ProfileAccess,[switch]$Unattended,[switch]$Desktop,[switch]$AllApplications,[switch]$Usability,[switch]$Screenshot,[switch]$Terminal,[switch]$Tui,[switch]$Wordcraft,[switch]$Image,[switch]$Media,[switch]$MediaUrl,[switch]$Assets,[switch]$V050)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $secretFile=Join-Path $repo '.runtime/railway/secrets.dpapi.json'
@@ -16,6 +16,7 @@ $credentials.verify_image=[bool]$Image
 $credentials.verify_media=[bool]$Media
 $credentials.verify_media_url=[bool]$MediaUrl
 $credentials.verify_assets=[bool]$Assets
+$credentials.verify_v050=[bool]$V050
 if(Test-Path -LiteralPath $secretFile){
     $protected=Get-Content -LiteralPath $secretFile -Raw|ConvertFrom-Json
     $credentials.owner_password=[Net.NetworkCredential]::new('',(ConvertTo-SecureString $protected.OPENCOMMANDER_OWNER_PASSWORD)).Password

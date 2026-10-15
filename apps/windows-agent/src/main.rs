@@ -8,6 +8,7 @@ mod clipboard;
 mod conpty;
 mod desktop;
 mod execution;
+mod file_export;
 mod files;
 mod image_place;
 mod installation;
@@ -19,7 +20,10 @@ mod system;
 mod terminal_input;
 mod ui;
 mod updater;
+mod visual_agent;
 mod wordcraft;
+mod wordcraft_compose;
+mod workflow;
 
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};

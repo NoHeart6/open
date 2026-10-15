@@ -14,7 +14,7 @@ Terminal mendukung empat task bersamaan. `terminal_execute` dengan `interactive=
 
 Proses yang selesai normal memiliki status task `succeeded`; periksa `exit_code` dan `program_succeeded` untuk hasil programnya. `success_exit_codes` default `[0]`; untuk pilihan normal `choice`, tetapkan kode yang diterima, misalnya `[1,2]`. Kegagalan peluncuran dan timeout tetap gagal, sedangkan pembatalan memiliki status `cancelled`.
 
-Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.5 memuat 38 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
+Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.5.0 memuat 42 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
 
 Metadata rilis memakai tanda tangan Ed25519 dan checksum SHA-256. Executable belum ditandatangani Authenticode.
 
@@ -46,3 +46,17 @@ Tool `asset_deliver` menerima **file asli yang tersedia dalam ChatGPT** mengguna
 Jika `destination` tidak ditentukan, file masuk `%USERPROFILE%\Pictures\OpenCommander\<file_name>` (nama unik saat bentrok). Gunakan `directory` untuk folder tujuan batch atau `destination` untuk nama spesifik. Opsi `wordcraft_cli_path`, `wordcraft_port`, `width_pt`, dan `alt_text` menyisipkan PNG/JPEG ke WordCraft aktif; file lain tetap disimpan di Windows. Transfer dilakukan streaming hingga 512 MiB, hash SHA-256 dihitung, dan partial transfer bisa dilanjutkan jika sumber mendukung HTTP Range dan file ID masih sama. URL yang sudah kedaluwarsa dapat diganti lewat fileParams dengan URL baru dan file ID sama.
 
 **Batas platform**: ChatGPT menentukan apakah file dari sebuah tool/generator tersedia untuk `openai/fileParams`. Plugin tidak dapat membaca file internal `sandbox:/...` hanya dari path atau ID yang tidak diberi download URL. Jika host tidak memberikan `download_url`, tool perlu dukungan API host tersebut; jangan menjanjikan transfer otomatis tanpa tes di chat aktual.
+
+
+## OpenCommander 0.5.0: bidirectional workflow + smart editor + visual computer
+
+- `file_export` reads binary Windows file data **back into ChatGPT** in exact 48 KiB Base64 chunks; `op=info` returns original name, size and SHA-256, `op=chunk` returns bounded bytes and next_offset. Maximum file size 512 MiB. For large files, a caller must request successive chunks: this is not yet an automatic ChatGPT-host file attachment/upload mechanism.
+- `workflow` runs up to 20 ordered steps with persistent checkpoint (`checkpoint_path`). `op=preview` previews validated actions; `op=run` executes; `op=status` inspects progress. Each step has `id`, `action` and `args`, and optional postcondition `verify: {type: exists|sha256|contains|wordcraft_image, path?, value?}`. A completed step never reruns when the same plan is retried. If a step fails, execution halts and must be explicitly retried with `retry_failed_step=true`; interrupted/uncertain outcomes require `retry_uncertain_step=true` after inspecting side effects. No arbitrary shell commands are allowed as workflow steps.
+- `wordcraft_compose` composes a fresh DOCX using WordCraft native MCP with ordered blocks: title, heading1/heading2/heading3, paragraph, image (optional caption), table (rectangular array), page_break. Maximum 80 blocks; verifies images through document inspection and refuses to overwrite an existing output document.
+- `visual_agent` supplies `op=observe` (window enumeration or HWND UIA inspection) and `op=act` (single exact UIA focus, invoke, select or set_value). Returns a post-action UI tree, and only marks verified when caller-provided expect_text appears in the new accessibility tree. Optional screenshot is returned as actual MCP image content when permitted. AI reasoning remains in ChatGPT, not on the PC.
+
+### Suggested one-prompt workflows
+
+To work with Windows files, first ask `file_export` for metadata and selected chunks. To automate a document pipeline, create steps for file operations, WordCraft edits and UI inspection; use `workflow` with a unique checkpoint path and explicit postconditions. For a complete new DOCX, use `wordcraft_compose` with blocks and an existing WordCraft `--control 7981` process. To interact visually, inspect before acting and provide `expect_text` so verification does not rely on assuming a click succeeded.
+
+All four tools run under the same paired-device policy, approved roots, local confirmation settings and native MCP authentication. The workflows are deterministic sequences supplied by ChatGPT; this release does not install or run any local language model. Automated multihour planners and arbitrary third-party application plug-ins are not included in this release.

@@ -203,17 +203,20 @@ fn ordinary_path(path: PathBuf) -> PathBuf {
 }
 pub fn category(action: &str, args: &Value) -> Result<&'static str> {
     match action {
-        "system_info" | "system_inventory" | "file_read" | "file_search" | "desktop_windows"
-        | "desktop_screenshot" | "desktop_inspect" | "terminal_screen" => Ok("READ"),
+        "system_info" | "system_inventory" | "file_export" | "file_read" | "file_search"
+        | "desktop_windows" | "desktop_screenshot" | "desktop_inspect" | "terminal_screen" => {
+            Ok("READ")
+        }
         "file_write" | "file_batch" | "file_undo" => Ok("MODIFY"),
         "file_recovery" => match args["op"].as_str() {
             Some("list") => Ok("READ"),
             Some("restore") => Ok("MODIFY"),
             _ => bail!("Unsupported recovery operation"),
         },
-        "image_place" | "asset_deliver" | "assets_deliver" | "media_transfer" | "wordcraft"
-        | "terminal_execute" | "terminal_input" | "application_launch" | "desktop_interact"
-        | "desktop_automation" | "clipboard_access" => Ok("SENSITIVE"),
+        "visual_agent" | "workflow" | "wordcraft_compose" | "image_place" | "asset_deliver"
+        | "assets_deliver" | "media_transfer" | "wordcraft" | "terminal_execute"
+        | "terminal_input" | "application_launch" | "desktop_interact" | "desktop_automation"
+        | "clipboard_access" => Ok("SENSITIVE"),
         "process_manage" => match args["op"].as_str() {
             Some("list") => Ok("READ"),
             Some("terminate") => Ok("SENSITIVE"),
