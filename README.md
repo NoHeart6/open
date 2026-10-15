@@ -1,74 +1,153 @@
-# OpenCommander
+<p align="center">
+  <img src="docs/assets/OpenCommander_Preview.jpg" alt="OpenCommander — Control · Automate · Connect" width="100%">
+</p>
 
-Agent Windows native yang dikendalikan melalui tool MCP dari percakapan ChatGPT.
+<h1 align="center"><img src="docs/assets/OpenCommander_AppIcon.png" alt="Ikon OpenCommander" width="48"> OpenCommander</h1>
 
-ChatGPT → MCP server TypeScript → gateway Go → agent Rust → Windows.
+<p align="center">
+  <b>Kendalikan Windows dan kerjakan dokumen WordCraft dari percakapan ChatGPT.</b><br>
+  Agent native Rust, terminal interaktif, otomasi desktop, transfer file, dan editor dokumen melalui MCP.
+</p>
 
-## Status saat ini
+<p align="center">
+  <a href="https://github.com/NoHeart6/open/releases/latest"><img src="https://img.shields.io/github/v/release/NoHeart6/open?style=flat-square&color=089bc1" alt="Rilis terbaru"></a>
+  <img src="https://img.shields.io/badge/Windows-x64-1679be?style=flat-square" alt="Windows x64">
+  <img src="https://img.shields.io/badge/agent-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Agent Rust">
+  <img src="https://img.shields.io/badge/protocol-MCP-16b8d4?style=flat-square" alt="Model Context Protocol">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563eb?style=flat-square" alt="Lisensi MIT"></a>
+</p>
 
-Agent Windows dan plugin v0.2.8 sudah terpasang; gateway dan server MCP produksi sudah diperbarui. Dua terminal berjalan bersamaan, terminal kedua tetap berfungsi saat server panjang aktif, dan tool baru `terminal_input` mengirim stdin serta EOF ke sesi interaktif. MCP menyediakan 32 tools. Bukti dan batas terminal ada di `docs/TERMINAL_FIX_2026-10-15.md`. Fokus UI Automation, isi teks, invoke, select, pengetikan, klik, drag, scroll dan `Get-FileHash` sebelumnya lulus pengujian pada agent terpasang (`docs/USABILITY_FIX_2026-10-15.md`). Screenshot langsung mengembalikan gambar MCP serta JPEG pada `result.image_data`; jalur tersebut kembali lolos uji pengiriman pada v0.2.8. Akses seluruh profil, semua aplikasi dan izin tetap yang diaktifkan pemilik masih tersimpan. Pada 15 Oktober 2026, pengguna mengonfirmasi AI di ChatGPT biasa dapat melihat dan menjelaskan screenshot bawaan v0.2.7 melalui `image()`.
+<p align="center">
+  <a href="https://github.com/NoHeart6/open/releases/latest"><b>⬇ Unduh Windows</b></a> ·
+  <a href="docs/PLUGIN_ACCESS.md"><b>🔌 Akses plugin</b></a> ·
+  <a href="#wordcraft"><b>📝 WordCraft</b></a> ·
+  <a href="docs/INSTALL_WINDOWS.md"><b>Panduan lengkap</b></a>
+</p>
 
-## Struktur
+## Dari percakapan ke pekerjaan di PC
 
-- `apps/windows-agent/`: agent, installer, UI izin, persetujuan lokal dan eksekusi Windows.
-- `apps/gateway/`: autentikasi perangkat, penyimpanan SQLite, routing dan task.
-- `apps/mcp-server/`: OAuth, tool MCP dan pengujian integrasi.
-- `infra/`: Docker, konfigurasi Keycloak dan kunci publik rilis.
-- `plugins/opencommander/`: paket plugin dan instruksi kontrol Windows.
-- `scripts/`: build, diagnosis, konfigurasi OAuth dan penandatanganan metadata rilis.
-- `.railway/`: konfigurasi infrastruktur Railway.
-- `docs/`: audit awal, hasil perbaikan dan batas verifikasi.
+<table>
+<tr>
+<td width="24%" align="center">
+  <img src="docs/assets/OpenCommander_Animated.gif" alt="Animasi logo OpenCommander dari paket desain" width="160"><br>
+  <sub>Control · Automate · Connect</sub>
+</td>
+<td>
 
-## Instalasi Windows
+OpenCommander menghubungkan AI di ChatGPT dengan komputer Windows yang dipasangkan oleh pemiliknya. Baca file, jalankan terminal, inspeksi aplikasi, dan buat dokumen dengan izin yang dikelola di PC.
 
-Jalankan `OpenCommanderSetup.exe`. Installer mempertahankan pairing dan kebijakan saat upgrade. Agent memiliki UI native untuk pairing, akses remote, folder yang diizinkan dan persetujuan tindakan sensitif.
+Versi **0.5.0** menyediakan **42 tools MCP**, termasuk ekspor file, workflow dengan checkpoint, penyusunan DOCX melalui WordCraft, dan aksi UI dengan pemeriksaan hasil. Penalaran AI berlangsung di ChatGPT; agent Windows menjalankan tindakan melalui Rust.
 
-Instalasi baru mengizinkan workspace terbatas. Pada PC ini, pemilik secara eksplisit mengizinkan seluruh profil `C:\Users\Administrator`. Kebijakan itu disimpan di konfigurasi lokal dan bertahan setelah restart/upgrade. Atas permintaan pemilik, mode izin tetap juga aktif pada PC ini (`ask_before_sensitive: false`), sehingga terminal dan kontrol Windows tidak meminta klik persetujuan per operasi. Instalasi baru tetap memakai konfirmasi per operasi. Centang kembali `Confirm sensitive actions` lalu simpan untuk mengaktifkan konfirmasi lagi. Folder internal agent, lokasi kredensial yang dikecualikan dan izin Windows tetap dilindungi.
+</td>
+</tr>
+</table>
 
-Gunakan `system_info` untuk melihat `agent_version` dan `workspace.approved_roots` sebelum operasi file atau menentukan working directory terminal. Detail dan bukti ada di `docs/PROFILE_ACCESS_2026-10-14.md` dan `docs/TRUSTED_OWNER_MODE_2026-10-14.md`.
+| | Kemampuan | Yang tersedia |
+| :--: | :-- | :-- |
+| 🖥️ | Desktop Windows | Screenshot, daftar jendela, UI Automation, fokus, klik, drag, scroll, dan input teks. |
+| ⌨️ | Terminal interaktif | Hingga empat task bersamaan, stdin/EOF pada pipe, ConPTY untuk TUI, input tombol, resize, dan pembacaan layar terminal. |
+| 📁 | File dan media | Baca, tulis, cari, batch/undo, transfer bertahap hingga 512 MiB, serta ekspor bytes ke pemanggil. |
+| 📝 | WordCraft | Akses 16 tools editor native dan pembuatan DOCX dengan judul, paragraf, gambar, caption, dan tabel. |
+| 🔁 | Workflow | Hingga 20 langkah berurutan, checkpoint tersimpan, pemeriksaan hasil, dan pelanjutan langkah yang sudah selesai. |
+| 🔐 | Izin lokal | Pairing, OAuth, folder yang disetujui, allowlist aplikasi, dan konfirmasi native tindakan sensitif secara default. |
 
-Pada PC ini `workspace.allow_all_applications` bernilai `true`. `application_launch` dapat meluncurkan executable lokal yang ada tanpa mendaftarkannya satu per satu. Pengaturan tersimpan sebagai `policy.allow_all_applications` dan tersedia pada checkbox `Allow all applications` di UI Windows. Working directory masih mengikuti root file yang diizinkan. Instalasi baru memakai allowlist sampai pemilik mengaktifkan pengaturan tersebut.
+## Unduh dan mulai
 
-## Hubungkan ChatGPT
+Semua berkas ada di **[GitHub Releases](https://github.com/NoHeart6/open/releases/latest)**. Binary Windows diterbitkan sebagai aset rilis; source tersedia di repository ini.
 
-Tambahkan server MCP kustom pada halaman Plugin ChatGPT dengan URL:
+| Unduhan | Kegunaan |
+| :-- | :-- |
+| [OpenCommanderSetup.exe](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommanderSetup.exe) | Installer Windows x64 dari build Rust 0.5.0. |
+| [opencommander-agent.exe](https://github.com/NoHeart6/open/releases/download/v0.5.0/opencommander-agent.exe) | Executable agent Rust untuk penggunaan manual; lihat `--help`. |
+| [OpenCommander-Windows-0.5.0.zip](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommander-Windows-0.5.0.zip) | Installer, agent, petunjuk instalasi, dan lisensi dependency. |
+| [OpenCommander-plugin-0.5.0.zip](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommander-plugin-0.5.0.zip) | Manifest MCP dan skill kontrol Windows/WordCraft untuk host yang mendukung format plugin ini. |
+| [WordCraft 0.7.0 portable](https://github.com/NoHeart6/open/releases/download/v0.5.0/wordcraft-0.7.0-windows-x64-portable.zip) | `wordcraft.exe`, `wordcraft-cli.exe`, dan lisensi upstream. |
+| [SHA256SUMS.txt](https://github.com/NoHeart6/open/releases/download/v0.5.0/SHA256SUMS.txt) | Checksum seluruh aset unduhan. |
 
-```text
-https://mcp-production-394c.up.railway.app/mcp
+1. **Pasang agent.** Jalankan `OpenCommanderSetup.exe`, lalu buka UI OpenCommander untuk pairing dan mengatur akses. Untuk upgrade, gunakan `OpenCommanderSetup.exe --upgrade`; pairing dan kebijakan lokal dipertahankan.
+2. **Hubungkan plugin.** Buka [halaman Plugins ChatGPT](https://chatgpt.com/plugins), tambahkan server MCP kustom berikut, pilih OAuth, lalu login dan pasangkan perangkat.
+
+   ```text
+   https://mcp-production-394c.up.railway.app/mcp
+   ```
+
+3. **Periksa koneksi.** Mulai dengan `device_list`, lalu `system_info` untuk memastikan perangkat, versi agent, dan folder yang diizinkan.
+4. **Tambahkan WordCraft** jika ingin mengolah dokumen; langkahnya ada di bawah.
+
+Paket plugin ZIP disediakan bersama [panduan akses](docs/PLUGIN_ACCESS.md). Ketersediaan penambahan server MCP kustom mengikuti fitur akun/host ChatGPT. Setelah pembaruan tools, refresh koneksi yang sudah ada dan mulai percakapan baru.
+
+> Binary Windows **belum ditandatangani Authenticode**. Metadata updater memakai Ed25519; checksum SHA-256 tersedia terpisah untuk unduhan GitHub.
+
+<a id="wordcraft"></a>
+
+## WordCraft
+
+<p>
+  <img src="docs/assets/wordcraft-icon.png" alt="Ikon WordCraft" width="52" align="left">
+  <b>Editor dokumen native Rust dengan akses MCP.</b><br>
+  OpenCommander meneruskan permintaan editor ke WordCraft lokal melalui CLI resminya.
+</p>
+
+<p align="center">
+  <img src="docs/assets/wordcraft-hero.png" alt="WordCraft upstream dengan ribbon, galeri styles, navigasi heading, dan dokumen dua halaman" width="100%"><br>
+  <sub>Tampilan contoh dari proyek WordCraft upstream, bukan rekaman workflow ChatGPT.</sub>
+</p>
+
+Ekstrak [WordCraft portable](https://github.com/NoHeart6/open/releases/download/v0.5.0/wordcraft-0.7.0-windows-x64-portable.zip) ke folder pilihan Anda. Dari folder yang berisi executable, jalankan:
+
+```powershell
+.\wordcraft.exe --control 7981
 ```
 
-Pilih OAuth, login pada halaman OpenCommander dan tinjau persetujuan. Setelah terhubung, mulai dengan `device_list` dan `system_info`. Password dan token tidak disertakan dalam paket plugin.
+Izinkan aplikasi WordCraft/CLI serta folder dokumen yang diperlukan di UI OpenCommander. Pada tool `wordcraft`, berikan path absolut `cli_path` ke `wordcraft-cli.exe`, `port: 7981`, nama `tool`, dan `arguments`. Mulai dengan `list_commands` agar AI membaca perintah editor yang tersedia.
 
-Untuk koneksi yang sudah ada, [pilih Refresh pada halaman Plugins](https://developers.openai.com/plugins/deploy/connect-chatgpt) setelah tools atau schema berubah, lalu mulai percakapan baru. MCP v0.2.8 mengiklankan 32 tools, termasuk `terminal_input`; `terminal_execute` menerima `interactive` dan `stdin`. Pengguna sudah mengonfirmasi terminal paralel dan stdout streaming berhasil, tetapi stdin masih terblokir di sesi ChatGPT yang belum menampilkan definisi baru. Eksekusi stdin/EOF melalui klien MCP independen sudah lulus; hasilnya tidak menggantikan pengujian host ChatGPT.
+| Pekerjaan | Tool |
+| :-- | :-- |
+| Membaca dan menyunting | `get_text`, `type_text`, `select_text`, `execute`, `batch` |
+| Mengelola dokumen | `new_document`, `open_document`, `save_document`, `inspect_document` |
+| Melihat hasil | `render_page`, `screenshot`, `ui_inspect` |
+| Mengendalikan editor | `click`, `key`, `list_commands`, `parity` |
+| Menyusun DOCX dari blok | `wordcraft_compose` di OpenCommander; hingga 80 blok termasuk gambar, caption, dan tabel. |
 
-## Pengembangan dan verifikasi
+Contoh permintaan setelah terhubung:
+
+> Gunakan WordCraft untuk membuat laporan dengan judul, dua bagian, tabel ringkasan, dan gambar yang saya lampirkan. Simpan sebagai DOCX di folder yang saya izinkan, lalu periksa dokumen dan hasil simpanannya.
+
+Transfer gambar dari chat memerlukan file atau URL unduhan yang benar-benar diberikan host. Path internal `sandbox:/...` saja tidak dapat diunduh agent. Ekspor file besar ke pemanggil dilakukan dalam chunk; lampiran ChatGPT otomatis belum dijamin. Lihat [batas transfer dan workflow](docs/INSTALL_WINDOWS.md).
+
+WordCraft dibuat oleh [proyek WordCraft / ArtCraft](https://github.com/storytold/wordcraft) dan didistribusikan ulang dengan lisensi **MIT OR Apache-2.0** serta pemberitahuan font yang disertakan. [Kredit aset](docs/assets/README.md).
+
+## Cara kerja
+
+```mermaid
+flowchart LR
+    A[ChatGPT] -->|MCP dan OAuth| B[Server MCP TypeScript]
+    B --> C[Gateway Go]
+    C -->|Perangkat berpasangan| D[Agent Windows Rust]
+    D --> E[File · Terminal · Desktop]
+    D -->|CLI dan loopback| F[WordCraft]
+```
+
+Instalasi baru menggunakan folder terbatas, allowlist aplikasi, dan konfirmasi tindakan sensitif. Pemilik mengatur akses melalui UI native; upgrade mempertahankan kebijakan yang sudah dipilih. Kontrol WordCraft mendengarkan di loopback dan kuncinya tetap lokal. Detail: [keamanan](docs/SECURITY.md) dan [instalasi Windows](docs/INSTALL_WINDOWS.md).
+
+## Dokumentasi dan pengembangan
+
+| Panduan | Isi |
+| :-- | :-- |
+| [Instalasi Windows](docs/INSTALL_WINDOWS.md) | Pairing, izin, terminal, media, WordCraft, dan workflow. |
+| [Akses plugin](docs/PLUGIN_ACCESS.md) | Koneksi ChatGPT, isi ZIP, konfigurasi MCP, dan WordCraft lokal. |
+| [Catatan rilis 0.5.0](docs/releases/v0.5.0.md) | Isi unduhan, asal binary, dan verifikasi paket. |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnosis koneksi dan masalah umum. |
+| [Validasi ChatGPT](docs/VALIDATION_CHATGPT.md) | Membedakan pengujian klien MCP dari bukti pada host ChatGPT. |
+
+Source utama: `apps/windows-agent/` (Rust), `apps/gateway/` (Go), `apps/mcp-server/` (TypeScript), dan `plugins/opencommander/` (paket plugin).
 
 ```powershell
 .\scripts\build.ps1 -Release
+.\scripts\package.ps1
 .\scripts\diagnose-chatgpt-integration.ps1
-.\scripts\diagnose-chatgpt-integration.ps1 -ProfileAccess
-.\scripts\diagnose-chatgpt-integration.ps1 -Desktop
-.\scripts\diagnose-chatgpt-integration.ps1 -AllApplications
-.\scripts\diagnose-chatgpt-integration.ps1 -Usability
-.\scripts\diagnose-chatgpt-integration.ps1 -Screenshot
-.\scripts\diagnose-chatgpt-integration.ps1 -Terminal
 ```
 
-Diagnosis produksi menggunakan kredensial lokal terenkripsi yang telah diprovisikan; jangan menambahkan kredensial ke source. Mode `-ProfileAccess` membuat fixture sementara pada profil pengguna yang sudah diizinkan, lalu membersihkannya.
+Pengujian: `cargo test --locked` dan `cargo clippy --locked --all-targets -- -D warnings` pada agent; `go test ./...` pada gateway; `npm run lint`, `npm run typecheck`, dan `npm test` pada server MCP. Diagnosis produksi memakai kredensial lokal terenkripsi; jangan memasukkan token, database, atau screenshot privat ke Git atau paket rilis.
 
-Mode `-Desktop` menggunakan izin tetap yang sudah diaktifkan pemilik, membaca screenshot dan menguji fokus pada jendela fixture sementara. Jendela fixture ditutup setelah pengujian. Untuk fokus jendela, `desktop_automation` cukup menerima `hwnd` dan `op: focus`. Untuk kontrol tertentu, gunakan `element_path` dari `desktop_inspect` dan nama/ID yang tidak kosong; inspeksi ulang setelah UI berubah.
-
-Rust: `cargo test --locked` dan `cargo clippy --locked --all-targets -- -D warnings` di `apps/windows-agent`. TypeScript: `npm run lint`, `npm run typecheck`, `npm test` di `apps/mcp-server`. E2E Windows lokal: `npx tsx test/e2e.ts --headless` atau tanpa `--headless` untuk pengujian desktop.
-
-Mode `-Usability` memverifikasi efek pada jendela fixture sementara, termasuk teks yang diketik, penghitung klik dan viewport setelah scroll. Biarkan mouse saat pengujian berlangsung agar input manual tidak bercampur. Mode `-Screenshot` membaca screenshot tanpa mengoperasikan aplikasi dan memeriksa gambar yang diterima pada panggilan asli, `task_status` dan `desktop_view`. Screenshot privat dan Base64 tidak ditulis ke laporan diagnosis.
-
-Mode `-Terminal` menguji dua perintah yang benar-benar overlap, perintah kedua saat server masih aktif, stdin Unicode, idempotensi input, EOF ketika keempat slot terisi, input awal dan cleanup sesi. Terminal memakai stdin pipe; program yang memerlukan PTY atau terminal layar penuh belum didukung. Batas durasi task tetap 600 detik.
-
-Paket Windows terbaru: `releases/windows/OpenCommander-Windows-0.2.8.zip`. Ekstrak lalu jalankan installer; gunakan `--upgrade` untuk instalasi yang sudah ada. Detail ada di `docs/INSTALL_WINDOWS.md`. Paket dapat dibuat ulang dengan `scripts/package.ps1` setelah build berhasil.
-
-Bukti pengujian berada di `artifacts/`; runtime, log, backup dan kredensial lokal dikecualikan dari Git dan ZIP plugin. Metadata rilis memakai Ed25519; executable belum ditandatangani Authenticode.
-
-
-## v0.5.0 ? End-to-end ChatGPT computer automation
-
-The MCP supports 42 tools, including `file_export` (binary PC?ChatGPT chunks up to 512 MiB), `workflow` (persistent, verified multi-step checkpoints), `wordcraft_compose` (native DOCX creation with headings, images, captions and tables), and `visual_agent` (observe / exact UIA action / postcondition verification). The paired Windows agent keeps existing approval and path policies, and no on-device LLM is required. See [Windows install and 0.5.0 workflow guide](docs/INSTALL_WINDOWS.md).
+OpenCommander berlisensi [MIT](LICENSE). Dependency mempertahankan [lisensi dan pemberitahuannya](THIRD_PARTY_NOTICES.md).

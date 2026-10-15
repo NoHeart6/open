@@ -47,11 +47,11 @@ To focus an application window, call desktop_automation with hwnd and op=focus; 
 
 Do not claim ChatGPT acceptance based on SDK, Codex, Work, health checks or tool discovery. Ordinary ChatGPT acceptance requires actual calls in that conversation and matching request/task evidence.
 
-## WordCraft integration (OpenCommander 0.3.1)
+## WordCraft integration (OpenCommander 0.5.0)
 
 WordCraft already has its own native stdio MCP. OpenCommander exposes the `wordcraft` tool to bridge that MCP over the authenticated Railway gateway to a locally running WordCraft desktop window, without exposing WordCraft's local control key.
 
-On this PC, WordCraft's portable app and CLI are installed in `C:\\Users\\Administrator\\Documents\\WordCraft\\wordcraft-0.7.0-windows-x64-portable`. Launch `wordcraft.exe --control 7981` if no WordCraft control server is running, and inspect connectivity to `127.0.0.1:7981` before sending requests. The app itself listens on loopback only.
+Locate WordCraft's portable app and CLI in the folder chosen by the owner when extracting the release. Use the real absolute path to `wordcraft-cli.exe`; do not assume a particular Windows user name or installation directory. Launch `wordcraft.exe --control 7981` if no WordCraft control server is running, and inspect connectivity to `127.0.0.1:7981` before sending requests. The app itself listens on loopback only. The owner must permit application launch and document folders through OpenCommander's local policy.
 
 Call the MCP tool `wordcraft` with `device_id`, a unique `idempotency_key`, `cli_path` pointing to the absolute, locally permitted `wordcraft-cli.exe`, `port: 7981`, `tool` and `arguments`. All 16 WordCraft-native MCP tools are available: `list_commands`, `execute`, `batch`, `new_document`, `open_document`, `save_document`, `type_text`, `select_text`, `get_text`, `inspect_document`, `render_page`, `parity`, `screenshot`, `click`, `key`, `ui_inspect`. Use `list_commands` to discover WordCraft's entire editor command registry; `execute` and `batch` pass native command IDs/params through. Call `render_page` and `screenshot` to receive `result.image_data` with `mime_type` and `base64` from `task_status`; forward it to the image viewer. Optional `output_path` writes the original image to disk. Paths supplied to document open/save must be absolute and inside locally approved roots. Do not save over an existing document without the owner's request and verification or a backup. All WordCraft command IDs are forwarded to its native editor engine; use `list_commands` to discover the supported parameters.
 
