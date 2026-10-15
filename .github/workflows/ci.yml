@@ -33,7 +33,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - run: cargo fmt --check; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo clippy --locked --all-targets -- -D warnings; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo build --locked; if ($LASTEXITCODE) { exit $LASTEXITCODE }; New-Item -ItemType Directory -Force ../../artifacts | Out-Null; Copy-Item target/debug/opencommander-agent.exe ../../artifacts/opencommander-agent.exe; Copy-Item target/debug/opencommander-agent.exe ../../artifacts/OpenCommander.exe; cargo test --locked; exit $LASTEXITCODE
+      - run: cargo fmt --check; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo clippy --locked --all-targets -- -D warnings; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo build --locked; if ($LASTEXITCODE) { exit $LASTEXITCODE }; New-Item -ItemType Directory -Force ../../artifacts | Out-Null; Copy-Item target/debug/opencommander-agent.exe ../../artifacts/opencommander-agent.exe; Copy-Item target/debug/opencommander-agent.exe ../../artifacts/OpenCommander.exe; cargo test --locked -- --test-threads=1; exit $LASTEXITCODE
         working-directory: apps/windows-agent
       - run: cargo install cargo-audit --locked; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cargo audit; exit $LASTEXITCODE
         working-directory: apps/windows-agent
