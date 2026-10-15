@@ -90,6 +90,7 @@ pub async fn execute(p: &Policy, action: &str, a: Value, context: Context<'_>) -
         }
         "media_transfer" => crate::media_transfer::run(p, &a, cancel, seconds).await,
         "wordcraft" => crate::wordcraft::run(p, &a, cancel, seconds).await,
+        "wordcraft_compose" => crate::wordcraft_compose::run(p, &a, cancel, seconds).await,
         "application_launch" => {
             let path = p.application(
                 a["path"]
@@ -133,6 +134,9 @@ pub async fn execute(p: &Policy, action: &str, a: Value, context: Context<'_>) -
             })
             .await?
         }
+        "file_export" => crate::file_export::run(p, &a, cancel),
+        "workflow" => crate::workflow::run(p, &a, cancel, seconds).await,
+        "visual_agent" => crate::visual_agent::run(p, &a),
         "file_read" | "file_write" | "file_search" | "file_operation" => {
             let p = p.clone();
             let action = action.to_owned();

@@ -12,8 +12,8 @@ const repo=fileURLToPath(new URL('../../..',import.meta.url));
 const config=JSON.parse(await readFile(repo+'/.runtime/railway/deployment.json','utf8')) as Record<string,string>;
 const resource=config.mcp_url!;const issuer=config.auth_url!+'/realms/opencommander';
 let input='';for await(const part of process.stdin)input+=String(part);
-const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean;verify_media?:boolean;verify_media_url?:boolean;verify_assets?:boolean};input='';
-const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true||credentials.verify_media===true||credentials.verify_media_url===true||credentials.verify_assets===true;
+const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean;verify_media?:boolean;verify_media_url?:boolean;verify_assets?:boolean;verify_v050?:boolean};input='';
+const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true||credentials.verify_media===true||credentials.verify_media_url===true||credentials.verify_assets===true||credentials.verify_v050===true;
 const fixtures:{folder:string;file:string}[]=[];
 const report:{at:string;client:string;host_chatgpt:string;checks:Record<string,unknown>[];system_info?:unknown;device_id?:string;task_id?:string}={at:new Date().toISOString(),client:'independent raw HTTP JSON-RPC, not ChatGPT host',host_chatgpt:'NOT VERIFIED',checks:[]};
 const pass=(name:string,detail?:unknown)=>{report.checks.push({name,status:'PASS',detail});console.log('PASS '+name)};
@@ -51,10 +51,77 @@ try{
  stage='real device_list';const devices=await call('device_list',{});assert(!devices.error);const connected=(devices.data.devices as Record<string,unknown>[]).filter(d=>d.connected);assert.equal(connected.length,1,'Expected one connected owned device for this read-only diagnostic');const owned=connected[0]!;report.device_id=String(owned.device_id);pass('Actual installed owned device connected',{device_id:report.device_id,request_id:devices.requestId});
  stage='real Windows system_info';const submitted=await call('system_info',{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30});assert(!submitted.error);report.task_id=String(submitted.data.task_id);pass('Read-only system_info submitted',{task_id:report.task_id,request_id:submitted.requestId});
  let completed:Awaited<ReturnType<typeof call>>|undefined;for(let n=0;n<60;n++){const status=await call('task_status',{task_id:report.task_id});assert(!status.error);if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(status.data.status))){completed=status;break}await new Promise(r=>setTimeout(r,500));}assert.equal(completed?.data.status,'succeeded');const info=completed!.data.result as Record<string,unknown>;assert.equal(info.os,'Windows');assert(typeof info.cpu==='string'&&info.cpu.length>0);assert(Number(info.memory_total_bytes)>0);assert(Number(info.uptime_seconds)>0);report.system_info=info;pass('Actual Windows OS, CPU, RAM and uptime returned',{task_id:report.task_id,request_id:completed!.requestId});
-  async function operate(name:string,args:Record<string,unknown>){const submitted=await call(name,{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,...args});assert(!submitted.error,'MCP '+name+' request rejected: '+JSON.stringify(submitted.data.error));for(let n=0;n<80;n++){const polled=await call('task_status',{task_id:submitted.data.task_id});assert(!polled.error);if(credentials.verify_unattended||credentials.verify_desktop||credentials.verify_all_applications||credentials.verify_usability)assert.notEqual(polled.data.status,'approval_pending','Trusted owner task unexpectedly requested a click');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(polled.data.status)))return {...polled.data,_content:polled.content};await new Promise(r=>setTimeout(r,250))}throw new Error('Profile access task did not finish')}
+  async function operate(name:string,args:Record<string,unknown>){const submitted=await call(name,{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,...args});assert(!submitted.error,'MCP '+name+' request rejected: '+JSON.stringify(submitted.data.error));for(let n=0;n<480;n++){const polled=await call('task_status',{task_id:submitted.data.task_id});assert(!polled.error);if(credentials.verify_unattended||credentials.verify_desktop||credentials.verify_all_applications||credentials.verify_usability)assert.notEqual(polled.data.status,'approval_pending','Trusted owner task unexpectedly requested a click');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(polled.data.status)))return {...polled.data,_content:polled.content};await new Promise(r=>setTimeout(r,250))}throw new Error('Profile access task did not finish')}
 
 
 
+
+ if(credentials.verify_v050){
+  stage='production v0.5.0 binary export, persistent workflow, smart document and visual observation';
+  const user=String((info.workspace as {user_profile:string}).user_profile);
+  const testDir=join(user,'OC_PLUGIN_TEST_20261014');
+  const image=join(user,'Pictures','OpenCommander','naruto_s_rasengan_lunge.png');
+  const original=await readFile(image);
+  const exported=await operate('file_export',{op:'info',path:image});
+  assert.equal(exported.status,'succeeded',String(exported.error));
+  assert.equal((exported.result as Record<string,unknown>).sha256,createHash('sha256').update(original).digest('hex'));
+  const chunk=await operate('file_export',{op:'chunk',path:image,offset:0,limit:49152});
+  assert.equal(chunk.status,'succeeded');
+  assert.deepEqual(Buffer.from(String((chunk.result as Record<string,unknown>).base64),'base64'),original.subarray(0,49152));
+  pass('file_export reads exact Windows image bytes and SHA-256 through MCP');
+
+  const key=randomUUID();
+  const file1=join(testDir,'workflow_first_'+key+'.txt');
+  const file2=join(testDir,'workflow_second_'+key+'.txt');
+  const checkpoint=join(testDir,'workflow_'+key+'.json');
+  const steps=[
+    {id:'create-first',action:'file_write',args:{path:file1,text:'OpenCommander workflow 0.5.0'},verify:{type:'contains',path:file1,value:'workflow 0.5.0'}},
+    {id:'create-second',action:'file_write',args:{path:file2,text:'checkpoint successful'},verify:{type:'exists',path:file2}}
+  ];
+  try {
+    const preview=await operate('workflow',{op:'preview',checkpoint_path:checkpoint,steps});
+    assert.equal(preview.status,'succeeded');
+    const done=await operate('workflow',{op:'run',checkpoint_path:checkpoint,steps});
+    assert.equal(done.status,'succeeded',String(done.error));
+    assert.equal((done.result as Record<string,unknown>).status,'completed',JSON.stringify(done.result));
+    const resume=await operate('workflow',{op:'run',checkpoint_path:checkpoint,steps});
+    assert.equal(resume.status,'succeeded');
+    assert.equal(((resume.result as Record<string,unknown>).results as unknown[]).length,0,'Resume must not redo completed steps');
+    const status=await operate('workflow',{op:'status',checkpoint_path:checkpoint});
+    assert.equal((status.result as Record<string,unknown>).complete,true);
+    pass('workflow preview, verified 2-step execution, persistent checkpoint and idempotent resume');
+  }finally{for(const path of [file1,file2,checkpoint]){await unlink(path).catch(()=>{});}}
+
+  const visual=await operate('visual_agent',{op:'observe'});
+  assert.equal(visual.status,'succeeded',String(visual.error));
+  assert((visual.result as Record<string,unknown>).before!==undefined);
+  pass('visual_agent observes actual Windows desktop window metadata through MCP');
+  const windows=(((visual.result as Record<string,unknown>).before as Record<string,unknown>).windows as {hwnd:number;title:string}[]);
+  const wordcraftWindow=windows.find(w=>w.title.includes('WordCraft'));
+  if(wordcraftWindow){
+    const focused=await operate('visual_agent',{op:'act',hwnd:wordcraftWindow.hwnd,action:'focus',expect_text:'WordCraft'});
+    assert.equal(focused.status,'succeeded',String(focused.error));
+    assert.equal((focused.result as Record<string,unknown>).verification_state,'verified');
+    pass('visual_agent focuses WordCraft and verifies real post-action UI tree');
+  }
+
+
+  const cli=join(user,'Documents','WordCraft','wordcraft-0.7.0-windows-x64-portable','wordcraft-cli.exe');
+  const output=join(user,'Documents','WordCraft','MCP Documents','OC_050_COMPOSE_'+key+'.docx');
+  const blocks=[
+    {type:'title',text:'OpenCommander 0.5.0 Test'},
+    {type:'heading1',text:'Pengujian WordCraft'},
+    {type:'paragraph',text:'Dokumen ini dibuat oleh WordCraft Smart Editor melalui MCP dan ChatGPT.'},
+    {type:'table',rows:[['Fitur','Status'],['Binary Export','PASS'],['Workflow','PASS']]},
+    {type:'image',path:image,width_pt:230,alt:'Naruto hasil ImageGen',caption:'Ilustrasi otomatis dari PC'}
+  ];
+  const composed=await operate('wordcraft_compose',{cli_path:cli,save_path:output,blocks,timeout_seconds:150});
+  assert.equal(composed.status,'succeeded','wordcraft_compose: '+String(composed.error??''));
+  assert.equal((composed.result as Record<string,unknown>).saved,true);
+  assert.equal((composed.result as Record<string,unknown>).verified_images,true);
+  const doc=await readFile(output);assert(doc.length>10000);
+  pass('wordcraft_compose created styled DOCX with native table, picture and caption',{bytes:doc.length});
+ }
  if(credentials.verify_assets){
   stage='ChatGPT fileParams automatic asset delivery over production MCP';
   const user=String((info.workspace as {user_profile:string}).user_profile);

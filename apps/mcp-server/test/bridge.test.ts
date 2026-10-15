@@ -148,3 +148,15 @@ test('ChatGPT asset bridge fileParams require signed URL and file ID',()=>{
  assert.equal(actions.asset_deliver.schema.safeParse({file:{...file,file_id:''}}).success,false);
  assert.equal(actions.assets_deliver.schema.safeParse({files:[]}).success,false);
 });
+
+test('v0.5.0 tool schemas expose safe binary export, checkpoint workflow, native WordCraft composer and visual agent',()=>{
+ assert(actions.file_export.schema.safeParse({op:'chunk',path:'C:\\Users\\Administrator\\Documents\\a.bin',offset:0,limit:49152}).success);
+ assert.equal(actions.file_export.schema.safeParse({path:'C:\\a',limit:49153}).success,false);
+ const checkpoint='C:\\Users\\Administrator\\Documents\\workflow.json';
+ const steps=[{id:'a',action:'file_write',args:{path:'C:\\test.txt',text:'ok'},verify:{type:'exists',path:'C:\\test.txt'}}];
+ assert(actions.workflow.schema.safeParse({op:'preview',checkpoint_path:checkpoint,steps}).success);
+ assert(actions.workflow.schema.safeParse({op:'status',checkpoint_path:checkpoint}).success);
+ assert(actions.wordcraft_compose.schema.safeParse({cli_path:'C:\\wc.exe',save_path:'C:\\doc.docx',blocks:[{type:'heading1',text:'Introduction'},{type:'paragraph',text:'Hello'}]}).success);
+ assert(actions.visual_agent.schema.safeParse({op:'observe'}).success);
+ assert(actions.visual_agent.schema.safeParse({op:'act',hwnd:100,action:'invoke',automation_id:'save',expect_text:'Saved'}).success);
+});

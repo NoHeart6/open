@@ -67,3 +67,8 @@ Mode `-Terminal` menguji dua perintah yang benar-benar overlap, perintah kedua s
 Paket Windows terbaru: `releases/windows/OpenCommander-Windows-0.2.8.zip`. Ekstrak lalu jalankan installer; gunakan `--upgrade` untuk instalasi yang sudah ada. Detail ada di `docs/INSTALL_WINDOWS.md`. Paket dapat dibuat ulang dengan `scripts/package.ps1` setelah build berhasil.
 
 Bukti pengujian berada di `artifacts/`; runtime, log, backup dan kredensial lokal dikecualikan dari Git dan ZIP plugin. Metadata rilis memakai Ed25519; executable belum ditandatangani Authenticode.
+
+
+## v0.5.0 ? End-to-end ChatGPT computer automation
+
+The MCP supports 42 tools, including `file_export` (binary PC?ChatGPT chunks up to 512 MiB), `workflow` (persistent, verified multi-step checkpoints), `wordcraft_compose` (native DOCX creation with headings, images, captions and tables), and `visual_agent` (observe / exact UIA action / postcondition verification). The paired Windows agent keeps existing approval and path policies, and no on-device LLM is required. See [Windows install and 0.5.0 workflow guide](docs/INSTALL_WINDOWS.md).

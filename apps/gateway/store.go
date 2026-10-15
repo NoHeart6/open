@@ -93,7 +93,7 @@ func (s *Server) audit(owner, device, task, event string) error {
 
 func category(action string, args json.RawMessage) (string, error) {
 	switch action {
-	case "system_info", "system_inventory", "file_read", "file_search", "desktop_windows", "desktop_screenshot", "desktop_inspect":
+	case "system_info", "system_inventory", "file_export", "file_read", "file_search", "desktop_windows", "desktop_screenshot", "desktop_inspect":
 		return "READ", nil
 	case "file_write", "file_batch", "file_undo":
 		return "MODIFY", nil
@@ -138,7 +138,7 @@ func category(action string, args json.RawMessage) (string, error) {
 		if a.Op == "terminate" {
 			return "SENSITIVE", nil
 		}
-	case "image_place", "asset_deliver", "assets_deliver", "media_transfer", "wordcraft", "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
+	case "visual_agent", "workflow", "wordcraft_compose", "image_place", "asset_deliver", "assets_deliver", "media_transfer", "wordcraft", "terminal_execute", "terminal_input", "application_launch", "desktop_interact", "desktop_automation", "clipboard_access":
 		return "SENSITIVE", nil
 	case "terminal_screen":
 		return "READ", nil
