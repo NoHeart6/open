@@ -8,6 +8,7 @@ mod conpty;
 mod desktop;
 mod execution;
 mod files;
+mod image_place;
 mod installation;
 mod policy;
 mod recovery;

@@ -209,8 +209,10 @@ pub fn category(action: &str, args: &Value) -> Result<&'static str> {
             Some("restore") => Ok("MODIFY"),
             _ => bail!("Unsupported recovery operation"),
         },
-        "wordcraft" | "terminal_execute" | "terminal_input" | "application_launch"
-        | "desktop_interact" | "desktop_automation" | "clipboard_access" => Ok("SENSITIVE"),
+        "image_place" | "wordcraft" | "terminal_execute" | "terminal_input"
+        | "application_launch" | "desktop_interact" | "desktop_automation" | "clipboard_access" => {
+            Ok("SENSITIVE")
+        }
         "process_manage" => match args["op"].as_str() {
             Some("list") => Ok("READ"),
             Some("terminate") => Ok("SENSITIVE"),

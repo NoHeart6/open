@@ -84,6 +84,7 @@ pub async fn execute(p: &Policy, action: &str, a: Value, context: Context<'_>) -
         }
         "terminal_input" => sessions.send(owner, &a).await,
         "terminal_screen" => sessions.screen(owner, &a),
+        "image_place" => crate::image_place::run(p, &a, cancel, seconds).await,
         "wordcraft" => crate::wordcraft::run(p, &a, cancel, seconds).await,
         "application_launch" => {
             let path = p.application(

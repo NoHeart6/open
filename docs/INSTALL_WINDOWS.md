@@ -14,6 +14,14 @@ Terminal mendukung empat task bersamaan. `terminal_execute` dengan `interactive=
 
 Proses yang selesai normal memiliki status task `succeeded`; periksa `exit_code` dan `program_succeeded` untuk hasil programnya. `success_exit_codes` default `[0]`; untuk pilihan normal `choice`, tetapkan kode yang diterima, misalnya `[1,2]`. Kegagalan peluncuran dan timeout tetap gagal, sedangkan pembatalan memiliki status `cancelled`.
 
-Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.1 memuat 34 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
+Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.2 memuat 35 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
 
 Metadata rilis memakai tanda tangan Ed25519 dan checksum SHA-256. Executable belum ditandatangani Authenticode.
+
+## Gambar dari ChatGPT ke Windows dan WordCraft
+
+Tool `image_place` menyimpan gambar PNG/JPEG pada path Windows yang diizinkan, tanpa menimpa file yang sudah ada. Masukkan tepat satu sumber: `source_url` (HTTPS langsung ke berkas gambar, maksimum 8 MB) atau `image_base64` (maksimum 1.400.000 karakter). Path tujuan wajib berakhiran .png/.jpg/.jpeg sesuai format asli. Tool mengembalikan path, dimensi, ukuran, dan SHA-256.
+
+Untuk langsung menyisipkan ke WordCraft, jalankan WordCraft dengan `--control 7981` dan tambahkan `wordcraft_cli_path` yang menunjuk ke `wordcraft-cli.exe`. Pengaturan opsional: `wordcraft_port`, `width_pt`, dan `alt_text`. Tool menggunakan command bawaan `insert.picture` pada dokumen aktif. Jika penyisipan gagal, gambar yang sudah berhasil disimpan tetap berada di PC dan `wordcraft_error` dikembalikan.
+
+File sandbox internal ChatGPT bukan alamat unduhan Windows. Jika hasil image generation tidak memberikan URL yang dapat diakses atau bytes/Base64 yang dapat diteruskan, asset perlu dijembatani terlebih dahulu. Tool ini tidak dengan sendirinya memberi ChatGPT akses langsung ke bytes tersembunyi dari generator gambar.

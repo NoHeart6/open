@@ -111,3 +111,13 @@ test('desktop_screenshot returns a completed image in the original tool call wit
   assert.equal(submissions,1);assert.equal(reads,3);
  }finally{await client.close();await new Promise<void>(resolve=>listener.close(()=>resolve()));await new Promise<void>(resolve=>gateway.close(()=>resolve()));}
 });
+
+test('image_place accepts one image source and validates placement options',()=>{
+ const schema=actions.image_place.schema;
+ const destination='C:\\Users\\Administrator\\Pictures\\chatgpt.png';
+ assert.equal(schema.safeParse({destination,source_url:'https://example.com/art.png'}).success,true);
+ assert.equal(schema.safeParse({destination,image_base64:'iVBORw0KGgo='}).success,true);
+ assert.equal(schema.safeParse({destination}).success,false);
+ assert.equal(schema.safeParse({destination,source_url:'https://example.com/art.png',image_base64:'abc'}).success,false);
+ assert.equal(schema.safeParse({destination,source_url:'https://example.com/art.png',width_pt:900}).success,false);
+});
