@@ -727,8 +727,15 @@ mod native {
                     }
                 }
                 let _cleanup = Cleanup(hwnd);
+                let expected_root = root.path().to_string_lossy().into_owned();
+                for _ in 0..100 {
+                    if value(hwnd, ROOTS) == expected_root {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
                 ensure!(
-                    value(hwnd, ROOTS) == root.path().to_string_lossy(),
+                    value(hwnd, ROOTS) == expected_root,
                     "Initial roots did not load"
                 );
                 ensure!(
