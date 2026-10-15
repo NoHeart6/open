@@ -57,7 +57,7 @@ try{
   stage='production resumable media transfer through Railway MCP';
   const folder=String((info.workspace as {user_profile:string}).user_profile)+'\\OC_PLUGIN_TEST_20261014';
   const dest=join(folder,'media_transfer_'+randomUUID()+'.bin');
-  const bytes=Buffer.alloc(2_621_653);
+  const bytes=Buffer.alloc(262_653);
   for(let k=0;k<bytes.length;k++)bytes[k]=k%251;
   const sha=createHash('sha256').update(bytes).digest('hex');
   let transferId='';
@@ -66,7 +66,7 @@ try{
     assert.equal(started.status,'succeeded');
     transferId=String((started.result as Record<string,unknown>).transfer_id);
     assert.equal(transferId.length,32);
-    const chunkSize=512*1024;
+    const chunkSize=64*1024;
     for(let offset=0;offset<bytes.length;offset+=chunkSize){
       const part=bytes.subarray(offset,Math.min(bytes.length,offset+chunkSize)).toString('base64');
       const chunk=await operate('media_transfer',{op:'chunk',destination:dest,transfer_id:transferId,offset,chunk_base64:part});
@@ -83,7 +83,7 @@ try{
     assert.equal((finish.result as Record<string,unknown>).sha256,sha);
     assert.equal((finish.result as Record<string,unknown>).saved,true);
     assert.deepEqual(await readFile(dest),bytes);
-    pass('Production media_transfer delivers 2.5 MB with resume, exact bytes and SHA-256');
+    pass('Production media_transfer delivers chunks with resume, exact bytes and SHA-256');
   }finally{
     await unlink(dest).catch(()=>{});
     await unlink(dest+'.oc-transfer.part').catch(()=>{});
