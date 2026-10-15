@@ -14,7 +14,7 @@ Terminal mendukung empat task bersamaan. `terminal_execute` dengan `interactive=
 
 Proses yang selesai normal memiliki status task `succeeded`; periksa `exit_code` dan `program_succeeded` untuk hasil programnya. `success_exit_codes` default `[0]`; untuk pilihan normal `choice`, tetapkan kode yang diterima, misalnya `[1,2]`. Kegagalan peluncuran dan timeout tetap gagal, sedangkan pembatalan memiliki status `cancelled`.
 
-Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.3 memuat 36 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
+Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.3.4 memuat 36 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
 
 Metadata rilis memakai tanda tangan Ed25519 dan checksum SHA-256. Executable belum ditandatangani Authenticode.
 
@@ -31,7 +31,7 @@ File sandbox internal ChatGPT bukan alamat unduhan Windows. Jika hasil image gen
 
 Tool `media_transfer` menyimpan file asli ke Windows secara bertahap; tidak perlu menaruh seluruh data Base64 dalam satu permintaan. Mulai dengan `op=begin`, `destination`, `total_bytes` (dan idealnya `sha256`). Gunakan `transfer_id` dari balasannya untuk semua operasi berikutnya.
 
-- **Transfer dari bytes lokal**: kirim `op=chunk` dengan `offset` sama dengan `received_bytes` dan `chunk_base64` maksimal 768 KiB terdecode; setiap respons menyertakan persentase kemajuan. Jika koneksi terputus, gunakan `op=status` lalu lanjut dari byte terakhir; mengirim ulang chunk identik tidak menggandakan data.
+- **Transfer dari bytes lokal**: kirim `op=chunk` dengan `offset` sama dengan `received_bytes` dan `chunk_base64` maksimal 64 KiB terdecode; setiap respons menyertakan persentase kemajuan. Jika koneksi terputus, gunakan `op=status` lalu lanjut dari byte terakhir; mengirim ulang chunk identik tidak menggandakan data.
 - **Transfer dari URL HTTPS**: setelah `begin`, jalankan `op=fetch` dengan `source_url`. Agent mengunduh langsung ke disk dan menggunakan HTTP Range untuk melanjutkan transfer setelah koneksi terputus. Server sumber perlu mendukung Range untuk resume.
 - **Selesai**: `op=finish` memeriksa jumlah byte dan SHA-256 (jika diberikan). Opsional `wordcraft_cli_path`, `width_pt`, dan `alt_text` untuk menyisipkan gambar ke dokumen WordCraft yang sedang aktif. Gambar tetap disimpan jika penyisipan WordCraft gagal.
 - **Batalkan**: `op=cancel` membersihkan transfer parsial. File final tidak ditimpa.

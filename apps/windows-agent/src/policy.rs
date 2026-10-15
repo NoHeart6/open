@@ -176,6 +176,8 @@ impl Policy {
         if category == "SENSITIVE" {
             let limit = if self.needs_consent(category) {
                 1024
+            } else if action == "media_transfer" && args["op"] == "chunk" {
+                1_150_000
             } else {
                 64 * 1024
             };

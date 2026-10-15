@@ -12,8 +12,8 @@ const repo=fileURLToPath(new URL('../../..',import.meta.url));
 const config=JSON.parse(await readFile(repo+'/.runtime/railway/deployment.json','utf8')) as Record<string,string>;
 const resource=config.mcp_url!;const issuer=config.auth_url!+'/realms/opencommander';
 let input='';for await(const part of process.stdin)input+=String(part);
-const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean;verify_media?:boolean};input='';
-const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true||credentials.verify_media===true;
+const credentials=JSON.parse(input||'{}') as {owner_password?:string;client_secret?:string;verify_profile_access?:boolean;verify_unattended?:boolean;verify_desktop?:boolean;verify_all_applications?:boolean;verify_usability?:boolean;verify_screenshot?:boolean;verify_terminal?:boolean;verify_tui?:boolean;verify_wordcraft?:boolean;verify_image?:boolean;verify_media?:boolean;verify_media_url?:boolean};input='';
+const controlRequested=credentials.verify_profile_access===true||credentials.verify_desktop===true||credentials.verify_all_applications===true||credentials.verify_usability===true||credentials.verify_terminal===true||credentials.verify_tui===true||credentials.verify_wordcraft===true||credentials.verify_image===true||credentials.verify_media===true||credentials.verify_media_url===true;
 const fixtures:{folder:string;file:string}[]=[];
 const report:{at:string;client:string;host_chatgpt:string;checks:Record<string,unknown>[];system_info?:unknown;device_id?:string;task_id?:string}={at:new Date().toISOString(),client:'independent raw HTTP JSON-RPC, not ChatGPT host',host_chatgpt:'NOT VERIFIED',checks:[]};
 const pass=(name:string,detail?:unknown)=>{report.checks.push({name,status:'PASS',detail});console.log('PASS '+name)};
@@ -43,7 +43,7 @@ try{
  const refreshResponse=await fetch(tokenEndpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:'opencommander-chatgpt',client_secret:credentials.client_secret,refresh_token:tokens.refresh_token})});assert.equal(refreshResponse.status,200);const refreshed=await refreshResponse.json() as NonNullable<typeof tokens>;
  const refreshedClaims=await jwtVerify(refreshed.access_token,createRemoteJWKSet(new URL(String(discovery.jwks_uri))),{issuer,audience:resource,algorithms:['RS256'],requiredClaims:['sub','iat','exp','jti']});assert.equal(refreshedClaims.payload.sub,verified.payload.sub);assert.equal(String(refreshedClaims.payload.scope).split(' ').includes('computer:control'),controlRequested);assert.notEqual(refreshed.refresh_token,tokens.refresh_token);tokens=refreshed;pass('Offline refresh without resource parameter retains exact MCP audience, owner and requested scope');
  let seq=0;
- async function rpc(method:string,params:unknown={},notify=false){const r=await fetch(resource,{method:'POST',headers:{Authorization:'Bearer '+tokens!.access_token,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',...notify?{}:{id:++seq},method,params})});const requestId=r.headers.get('x-opencommander-request-id');assert.match(requestId??'',/^[a-f0-9-]{36}$/);assert(r.ok,'Authenticated MCP HTTP failure');const text=await r.text();if(notify){pass('Initialized notification accepted',{request_id:requestId});return null}const value=JSON.parse(r.headers.get('content-type')?.includes('text/event-stream')?text.split('\n').filter(l=>l.startsWith('data: ')).map(l=>l.slice(6)).join(''):text) as {error?:unknown;result:Record<string,unknown>};assert(!value.error,'JSON-RPC error');return {result:value.result,requestId};}
+ async function rpc(method:string,params:unknown={},notify=false){const r=await fetch(resource,{method:'POST',headers:{Authorization:'Bearer '+tokens!.access_token,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',...notify?{}:{id:++seq},method,params})});const requestId=r.headers.get('x-opencommander-request-id');assert.match(requestId??'',/^[a-f0-9-]{36}$/);if(!r.ok)throw new Error('Authenticated MCP HTTP '+r.status+': '+(await r.text()).slice(0,500));const text=await r.text();if(notify){pass('Initialized notification accepted',{request_id:requestId});return null}const value=JSON.parse(r.headers.get('content-type')?.includes('text/event-stream')?text.split('\n').filter(l=>l.startsWith('data: ')).map(l=>l.slice(6)).join(''):text) as {error?:unknown;result:Record<string,unknown>};assert(!value.error,'JSON-RPC error');return {result:value.result,requestId};}
  stage='raw initialize and discovery';const initialized=await rpc('initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'opencommander-independent-diagnosis',version:'0.1.0'}});assert.equal((initialized!.result.serverInfo as {version:string}).version,serverVersion);pass('Independent raw HTTP initialize',{request_id:initialized!.requestId,protocol:initialized!.result.protocolVersion,server_version:serverVersion});await rpc('notifications/initialized',{},true);
  const listed=await rpc('tools/list');const tools=listed!.result.tools as {name:string;inputSchema:Record<string,unknown>}[];assert.equal(tools.length,Object.keys(actions).length+compatibilityTools.length+10);assert(tools.every(t=>t.inputSchema.type==='object'));pass('Independent authenticated tools/list',{request_id:listed!.requestId,count:tools.length,names:tools.map(t=>t.name)});
  const terminalProperties=tools.find(t=>t.name==='terminal_execute')?.inputSchema.properties as Record<string,{type:string}>|undefined;assert.equal(terminalProperties?.interactive?.type,'boolean');assert.equal(terminalProperties?.stdin?.type,'string');assert(tools.some(t=>t.name==='terminal_input'));pass('Production advertises interactive, stdin and terminal_input',{request_id:listed!.requestId,interactive:true,stdin:true,terminal_input:true});
@@ -53,6 +53,33 @@ try{
  let completed:Awaited<ReturnType<typeof call>>|undefined;for(let n=0;n<60;n++){const status=await call('task_status',{task_id:report.task_id});assert(!status.error);if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(status.data.status))){completed=status;break}await new Promise(r=>setTimeout(r,500));}assert.equal(completed?.data.status,'succeeded');const info=completed!.data.result as Record<string,unknown>;assert.equal(info.os,'Windows');assert(typeof info.cpu==='string'&&info.cpu.length>0);assert(Number(info.memory_total_bytes)>0);assert(Number(info.uptime_seconds)>0);report.system_info=info;pass('Actual Windows OS, CPU, RAM and uptime returned',{task_id:report.task_id,request_id:completed!.requestId});
   async function operate(name:string,args:Record<string,unknown>){const submitted=await call(name,{device_id:report.device_id,idempotency_key:randomUUID(),timeout_seconds:30,...args});assert(!submitted.error,'MCP '+name+' request rejected: '+JSON.stringify(submitted.data.error));for(let n=0;n<80;n++){const polled=await call('task_status',{task_id:submitted.data.task_id});assert(!polled.error);if(credentials.verify_unattended||credentials.verify_desktop||credentials.verify_all_applications||credentials.verify_usability)assert.notEqual(polled.data.status,'approval_pending','Trusted owner task unexpectedly requested a click');if(['succeeded','failed','cancelled','expired','uncertain'].includes(String(polled.data.status)))return {...polled.data,_content:polled.content};await new Promise(r=>setTimeout(r,250))}throw new Error('Profile access task did not finish')}
 
+
+ if(credentials.verify_media_url) {
+   stage='production direct HTTPS media fetch through Railway MCP';
+   const user=String((info.workspace as {user_profile:string}).user_profile);
+   const path=join(user,'OC_PLUGIN_TEST_20261014','media_https_'+randomUUID()+'.bin');
+   const total=10_485_760;
+   const source='https://speed.cloudflare.com/__down?bytes=10485760';
+   let id='';
+   try{
+     const begin=await operate('media_transfer',{op:'begin',destination:path,total_bytes:total});
+     assert.equal(begin.status,'succeeded',String(begin.error));
+     id=String((begin.result as Record<string,unknown>).transfer_id);
+     const download=await operate('media_transfer',{op:'fetch',destination:path,transfer_id:id,source_url:source});
+     assert.equal(download.status,'succeeded',String(download.error));
+     assert.equal((download.result as Record<string,unknown>).received_bytes,total);
+     const finish=await operate('media_transfer',{op:'finish',destination:path,transfer_id:id});
+     assert.equal(finish.status,'succeeded',String(finish.error));
+     const final=await readFile(path);
+     assert.equal(final.length,total);
+     assert.equal((finish.result as Record<string,unknown>).sha256,createHash('sha256').update(final).digest('hex'));
+     pass('Production media_transfer downloads 10 MiB directly over HTTPS with exact bytes and SHA-256');
+   }finally{
+     await unlink(path).catch(()=>{});
+     await unlink(path+'.oc-transfer.part').catch(()=>{});
+     await unlink(path+'.oc-transfer.json').catch(()=>{});
+   }
+ }
  if(credentials.verify_media){
   stage='production resumable media transfer through Railway MCP';
   const folder=String((info.workspace as {user_profile:string}).user_profile)+'\\OC_PLUGIN_TEST_20261014';
@@ -66,7 +93,7 @@ try{
     assert.equal(started.status,'succeeded');
     transferId=String((started.result as Record<string,unknown>).transfer_id);
     assert.equal(transferId.length,32);
-    const chunkSize=512*1024;
+    const chunkSize=64*1024;
     for(let offset=0;offset<bytes.length;offset+=chunkSize){
       const part=bytes.subarray(offset,Math.min(bytes.length,offset+chunkSize)).toString('base64');
       const chunk=await operate('media_transfer',{op:'chunk',destination:dest,transfer_id:transferId,offset,chunk_base64:part});

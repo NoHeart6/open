@@ -320,6 +320,8 @@ mod tests {
         let hash = hex::encode(Sha256::digest(&bytes));
         let params = json!({"op":"begin","destination":p,"total_bytes":bytes.len(),"sha256":hash});
         let c = Arc::new(AtomicBool::new(false));
+        let large_payload = json!({"op":"chunk","chunk_base64":"A".repeat(700000)});
+        policy.authorize("media_transfer", &large_payload)?;
         let begin = run(&policy, &params, c.clone(), 30).await?;
         let id = begin["transfer_id"].as_str().unwrap();
         for (i, part) in bytes.chunks(500_000).enumerate() {
