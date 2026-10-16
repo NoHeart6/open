@@ -172,7 +172,7 @@ func (s *Server) handler() http.Handler {
 			fail(w, 503, "storage unavailable")
 			return
 		}
-		respond(w, 200, map[string]string{"status": "ok", "protocol": "1"})
+		respond(w, 200, map[string]any{"status": "ok", "protocol": "1", "version": "0.5.1", "history_idle_seconds": historyIdleSeconds})
 	})
 	mux.HandleFunc("POST /v1/enroll", s.enroll)
 	mux.HandleFunc("POST /v1/enroll/{id}/poll", s.pollEnrollment)
@@ -270,6 +270,10 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, c *Claims) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/")
+	if err := s.recordHistoryActivity(c.Subject); err != nil {
+		fail(w, 503, "activity storage unavailable")
+		return
+	}
 	switch {
 	case path == "token/revoke" && r.Method == "POST":
 		if c.TokenID == "" || c.TokenExpires <= time.Now().Unix() {
@@ -414,7 +418,7 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, c *Claims) {
 				chunks = append(chunks, map[string]any{"seq": seq, "stream": stream, "text": text})
 				after = seq
 			}
-			respond(w, 200, map[string]any{"task_id": id, "status": t.Status, "chunks": chunks, "next_after": after, "retention_days": 7})
+			respond(w, 200, map[string]any{"task_id": id, "status": t.Status, "chunks": chunks, "next_after": after, "retention_idle_seconds": historyIdleSeconds})
 			return
 		}
 		if cancel && r.Method == "POST" {
@@ -617,7 +621,11 @@ func (s *Server) connectAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	s.send(proof.DeviceID, map[string]any{"type": "hello", "protocol_version": 1, "streaming_output": true})
+	activity, err := s.historyActivity(owner)
+	if err != nil {
+		return
+	}
+	s.send(proof.DeviceID, map[string]any{"type": "hello", "protocol_version": 1, "streaming_output": true, "mcp_activity_at": activity})
 	for {
 		var msg struct {
 			Type   string          `json:"type"`
@@ -635,7 +643,11 @@ func (s *Server) connectAgent(w http.ResponseWriter, r *http.Request) {
 		conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 		_, _ = s.db.Exec("UPDATE devices SET last_seen=? WHERE id=?", time.Now().Unix(), proof.DeviceID)
 		if msg.Type == "heartbeat" {
-			s.send(proof.DeviceID, map[string]string{"type": "heartbeat"})
+			activity, err := s.historyActivity(owner)
+			if err != nil {
+				return
+			}
+			s.send(proof.DeviceID, map[string]any{"type": "heartbeat", "mcp_activity_at": activity})
 			continue
 		}
 		if msg.Type == "output" && proof.JournalACK {
@@ -646,8 +658,11 @@ func (s *Server) connectAgent(w http.ResponseWriter, r *http.Request) {
 			if err != nil || t.DeviceID != proof.DeviceID || t.Action != "terminal_execute" {
 				return
 			}
-			_, err = s.db.Exec("INSERT INTO task_output(task_id,seq,stream,text,at) VALUES(?,?,?,?,?) ON CONFLICT(task_id,seq) DO NOTHING", msg.TaskID, msg.Seq, msg.Stream, msg.Text, time.Now().Unix())
+			inserted, err := s.db.Exec("INSERT INTO task_output(task_id,seq,stream,text,at) VALUES(?,?,?,?,?) ON CONFLICT(task_id,seq) DO NOTHING", msg.TaskID, msg.Seq, msg.Stream, msg.Text, time.Now().Unix())
 			if err != nil {
+				return
+			}
+			if n, _ := inserted.RowsAffected(); n > 0 && s.recordHistoryActivity(owner) != nil {
 				return
 			}
 			var stream, text string
@@ -679,6 +694,11 @@ func (s *Server) connectAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		var previousStatus string
+		if err := tx.QueryRow("SELECT status FROM tasks WHERE id=? AND device_id=? AND owner=?", msg.TaskID, proof.DeviceID, owner).Scan(&previousStatus); err != nil {
+			tx.Rollback()
+			continue
+		}
 		res, err := tx.Exec("UPDATE tasks SET status=?,started_at=COALESCE(started_at,?),completed_at=?,result=?,error=? WHERE id=? AND device_id=? AND owner=? AND status IN ('dispatched','running','approval_pending','cancelling','uncertain')", msg.Status, time.Now().Unix(), completed, string(msg.Result), msg.Error, msg.TaskID, proof.DeviceID, owner)
 		if err != nil {
 			tx.Rollback()
@@ -692,6 +712,9 @@ func (s *Server) connectAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if tx.Commit() != nil {
+			return
+		}
+		if n > 0 && previousStatus != msg.Status && s.recordHistoryActivity(owner) != nil {
 			return
 		}
 		if completed != nil && proof.JournalACK {
@@ -714,10 +737,10 @@ func (s *Server) dispatch() {
 			return
 		case <-ticker.C:
 			if now := time.Now().Unix(); now >= nextPrune {
-				if err := s.pruneOutput(now); err != nil {
-					slog.Error("terminal output retention failed", "error", err)
+				if err := s.pruneHistory(now); err != nil {
+					slog.Error("idle history cleanup failed", "error", err)
 				}
-				nextPrune = now + 60*60
+				nextPrune = now + 10
 			}
 			// Allow executors three seconds to commit timeout/cancel results, then report unknown outcomes.
 			_, _ = s.db.Exec("UPDATE tasks SET status='uncertain',error='execution deadline passed without a committed outcome' WHERE status IN ('dispatched','running','approval_pending','cancelling') AND deadline<?", time.Now().Unix()-3)

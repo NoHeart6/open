@@ -1,4 +1,6 @@
-# OpenCommander plugin 0.5.0
+# OpenCommander plugin 0.5.1
+
+Task history, results, terminal output and activity logs are automatically cleared after one hour without MCP use and no active tasks. Heartbeats do not extend retention. Pairing, permissions, work files, trash and undo receipts are retained. This behavior requires agent and gateway 0.5.1; plugin instructions alone cannot clean PC storage.
 
 Control a paired Windows computer and its local WordCraft editor through authenticated MCP tools. This package includes the MCP manifest, Windows/WordCraft skill, and OpenCommander icons.
 
@@ -10,6 +12,6 @@ Extracting this ZIP alone does not install a connection into a ChatGPT account. 
 
 ## WordCraft
 
-Download WordCraft portable from the [GitHub release](https://github.com/NoHeart6/open/releases/tag/v0.5.0). Run `wordcraft.exe --control 7981` and allow the app/CLI and document folders in the local OpenCommander UI. Use `wordcraft` with the actual absolute `cli_path` to `wordcraft-cli.exe` and `tool: list_commands`; use `wordcraft_compose` for structured DOCX creation.
+Download WordCraft portable from the [GitHub release](https://github.com/NoHeart6/open/releases/tag/v0.5.1). Run `wordcraft.exe --control 7981` and allow the app/CLI and document folders in the local OpenCommander UI. Use `wordcraft` with the actual absolute `cli_path` to `wordcraft-cli.exe` and `tool: list_commands`; use `wordcraft_compose` for structured DOCX creation.
 
 See the [full connection guide](https://github.com/NoHeart6/open/blob/main/docs/PLUGIN_ACCESS.md) and [Windows guide](https://github.com/NoHeart6/open/blob/main/docs/INSTALL_WINDOWS.md). OpenCommander is MIT licensed; the separate WordCraft archive retains its upstream MIT OR Apache-2.0 licenses.

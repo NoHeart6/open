@@ -25,7 +25,7 @@ export function app(c:Config,record:(event:Record<string,unknown>)=>void=event=>
   if(host!==new URL(c.resource).host|| (origin&&origin!==new URL(c.resource).origin)){res.status(403).json({error:'Origin or Host rejected'});return;}
   let id;
   try{id=await authenticate(req.headers.authorization);}catch{
-   res.setHeader('WWW-Authenticate',`Bearer resource_metadata="${new URL('/.well-known/oauth-protected-resource',c.resource)}", scope="computer:read"`);
+   res.setHeader('WWW-Authenticate',`Bearer resource_metadata="${new URL('/.well-known/oauth-protected-resource',c.resource)}", scope="computer:read computer:control"`);
    res.status(401).json({error:'Authentication required'});return;
   }
   const authenticated=id;res.locals.authenticated=true;

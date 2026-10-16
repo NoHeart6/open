@@ -2,7 +2,7 @@
 
 ## ChatGPT melalui MCP remote
 
-1. Unduh dan pasang agent Windows dari [rilis 0.5.0](https://github.com/NoHeart6/open/releases/tag/v0.5.0).
+1. Unduh dan pasang agent Windows dari [rilis 0.5.1](https://github.com/NoHeart6/open/releases/tag/v0.5.1).
 2. Buka UI OpenCommander, atur folder/aplikasi yang diizinkan, dan siapkan pairing perangkat.
 3. Buka [Plugins ChatGPT](https://chatgpt.com/plugins). Jika akun/host menyediakan server MCP kustom, tambahkan:
 
@@ -11,13 +11,13 @@
    ```
 
 4. Gunakan OAuth, login dengan akun OpenCommander Anda, tinjau scope, dan selesaikan pairing. Paket unduhan tidak berisi akun, password, token, atau identitas perangkat.
-5. Mulai percakapan dengan `device_list`, lalu `system_info`. Pastikan perangkat online, agent versi 0.5.0, dan root file sesuai izin pemilik.
+5. Mulai percakapan dengan `device_list`, lalu `system_info`. Pastikan perangkat online, agent versi 0.5.1, dan root file sesuai izin pemilik.
 
-Sesudah schema/tools diperbarui, refresh koneksi MCP dan mulai percakapan baru. Daftar tools versi 0.5.0 berjumlah 42. Halaman Plugins adalah pintu masuk pengaturan; bukan tautan instalasi publik satu klik untuk paket ini. Penambahan MCP kustom bergantung pada fitur yang tersedia di akun/host.
+Sesudah schema/tools diperbarui, refresh koneksi MCP dan mulai percakapan baru. Daftar tools versi 0.5.1 berjumlah 43. Halaman Plugins adalah pintu masuk pengaturan; bukan tautan instalasi publik satu klik untuk paket ini. Penambahan MCP kustom bergantung pada fitur yang tersedia di akun/host.
 
 ## Paket plugin unduhan
 
-[OpenCommander-plugin-0.5.0.zip](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommander-plugin-0.5.0.zip) berisi:
+[OpenCommander-plugin-0.5.1.zip](https://github.com/NoHeart6/open/releases/download/v0.5.1/OpenCommander-plugin-0.5.1.zip) berisi:
 
 ```text
 plugin.json
@@ -48,7 +48,7 @@ Ikuti login OAuth dari klien; jangan menaruh bearer token dalam konfigurasi yang
 
 ## Mengaktifkan WordCraft lewat OpenCommander
 
-Unduh [WordCraft 0.7.0 portable](https://github.com/NoHeart6/open/releases/download/v0.5.0/wordcraft-0.7.0-windows-x64-portable.zip), ekstrak, lalu jalankan dari folder executable:
+Unduh [WordCraft 0.7.0 portable](https://github.com/NoHeart6/open/releases/download/v0.5.1/wordcraft-0.7.0-windows-x64-portable.zip), ekstrak, lalu jalankan dari folder executable:
 
 ```powershell
 .\wordcraft.exe --control 7981

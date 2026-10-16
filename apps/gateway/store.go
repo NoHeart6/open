@@ -18,15 +18,12 @@ CREATE TABLE IF NOT EXISTS nonces(nonce TEXT PRIMARY KEY, expires INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS revoked_tokens(jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS task_output(task_id TEXT NOT NULL REFERENCES tasks(id), seq INTEGER NOT NULL, stream TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(task_id,seq));
 CREATE INDEX IF NOT EXISTS task_output_retention ON task_output(at);
+CREATE TABLE IF NOT EXISTS mcp_activity(owner TEXT PRIMARY KEY, last_used INTEGER NOT NULL);
+INSERT INTO mcp_activity(owner,last_used) SELECT owner,MAX(at) FROM
+  (SELECT owner,MAX(created_at,COALESCE(started_at,0),COALESCE(completed_at,0)) AS at FROM tasks UNION ALL SELECT owner,at FROM audit)
+  GROUP BY owner HAVING true ON CONFLICT(owner) DO NOTHING;
 PRAGMA user_version=1;
 `
-
-func (s *Server) pruneOutput(now int64) error {
-	// Preserve chunks of unfinished work; finished output has a seven-day retention.
-	_, err := s.db.Exec(`DELETE FROM task_output WHERE at<? AND task_id IN
-		(SELECT id FROM tasks WHERE status IN ('succeeded','failed','cancelled','expired','uncertain'))`, now-7*24*60*60)
-	return err
-}
 
 func openStore(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)

@@ -10,10 +10,11 @@ mod desktop;
 mod execution;
 mod file_export;
 mod files;
+mod history;
 mod image_place;
 mod installation;
-mod motiongraphics;
 mod media_transfer;
+mod motiongraphics;
 mod policy;
 mod recovery;
 mod storage;
@@ -457,6 +458,7 @@ async fn run_task(t: Task, flag: Arc<AtomicBool>, runtime: TaskRuntime) -> Resul
             record.error = format!("{error:#}").chars().take(1024).collect();
         }
     }
+    history::touch(&state, now())?;
     save_record(&state, &record)?;
     cancels
         .lock()
@@ -541,9 +543,7 @@ async fn connect(
                     let entry=entry?;
                     if entry.path().extension().is_some_and(|s|s=="dpapi") {
                         let record:Record=serde_json::from_slice(&storage::load(&entry.path())?)?;
-                        if record.acknowledged_at > 0 && now().saturating_sub(record.acknowledged_at) > 7*86400 {
-                            std::fs::remove_file(entry.path())?;
-                        } else if record.acknowledged_at == 0 && !matches!(record.status.as_str(),"running"|"approval_pending") {sender.send(update(&record)).await?;}
+                        if record.acknowledged_at == 0 && !matches!(record.status.as_str(),"running"|"approval_pending") {sender.send(update(&record)).await?;}
                     }
                 }
             },
@@ -553,8 +553,17 @@ async fn connect(
                         last=tokio::time::Instant::now();if text.len()>512*1024{break Err(anyhow::anyhow!("Gateway frame too large"))}
                         let v:Value=match serde_json::from_str(&text){Ok(v)=>v,Err(e)=>break Err(e.into())};
                         match v["type"].as_str(){
-                            Some("hello")=>{if v["protocol_version"]!=1{break Err(anyhow::anyhow!("Incompatible gateway protocol"))} streaming=v["streaming_output"]==true; if streaming {reconcile_output(state,&sender)?;}},
-                            Some("heartbeat")=>(),
+                            Some("hello")=>{
+                                if v["protocol_version"]!=1{break Err(anyhow::anyhow!("Incompatible gateway protocol"))}
+                                if let Some(at)=v["mcp_activity_at"].as_u64(){history::touch(state,at)?;}
+                                streaming=v["streaming_output"]==true;
+                                if streaming {reconcile_output(state,&sender)?;}
+                            },
+                            Some("heartbeat")=>{
+                                if let Some(at)=v["mcp_activity_at"].as_u64(){history::touch(state,at)?;}
+                                let active=cancels.lock().map_err(|_|anyhow::anyhow!("Cancellation lock failed"))?;
+                                history::prune(state,now(),!active.is_empty())?;
+                            },
                             Some("ack")=>{ acknowledge(state, &v)?; },
                             Some("output_ack")=>{
                                 let path=execution::output_path(state,v["task_id"].as_str().context("Missing output task")?,v["seq"].as_u64().context("Missing output sequence")?)?;
@@ -563,6 +572,7 @@ async fn connect(
                             Some("cancel")=>{if let Some(id)=v["task_id"].as_str() && let Some(flag)=cancels.lock().map_err(|_|anyhow::anyhow!("Cancellation lock failed"))?.get(id){flag.store(true,Ordering::SeqCst);}},
                             Some("task")=>{
                                 let t=match verify_task(&v,creds){Ok(t)=>t,Err(e)=>{println!("{}",json!({"event":"request_rejected","error":e.to_string()}));continue}};
+                                history::touch(state,now())?;
                                 // Reserve the task in the receive loop to reject concurrent duplicate delivery.
                                 let flag=Arc::new(AtomicBool::new(false));
                                 {let mut map=cancels.lock().map_err(|_|anyhow::anyhow!("Cancellation lock failed"))?;
@@ -844,10 +854,17 @@ async fn run() -> Result<()> {
         );
         return Ok(());
     }
+    history::prune(&state, now(), false)?;
     recover(&state)?;
     let scheduler = TaskScheduler::default();
     let mut failures = 0u32;
     loop {
+        {
+            let active = cancels
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Cancellation lock failed"))?;
+            history::prune(&state, now(), !active.is_empty())?;
+        }
         consume_local_control(&state, &control)?;
         if control.shutdown.load(Ordering::SeqCst) {
             control.cancel_all(&cancels);

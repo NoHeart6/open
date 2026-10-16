@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/NoHeart6/open/releases/latest"><img src="https://img.shields.io/badge/release-v0.5.0-089bc1?style=flat-square" alt="Rilis 0.5.0"></a>
+  <a href="https://github.com/NoHeart6/open/releases/latest"><img src="https://img.shields.io/badge/release-v0.5.1-089bc1?style=flat-square" alt="Rilis 0.5.1"></a>
   <img src="https://img.shields.io/badge/Windows-x64-1679be?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/agent-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Agent Rust">
   <img src="https://img.shields.io/badge/protocol-MCP-16b8d4?style=flat-square" alt="Model Context Protocol">
@@ -36,7 +36,7 @@
 
 OpenCommander menghubungkan AI di ChatGPT dengan komputer Windows yang dipasangkan oleh pemiliknya. Baca file, jalankan terminal, inspeksi aplikasi, dan buat dokumen dengan izin yang dikelola di PC.
 
-Versi **0.5.0** menyediakan **42 tools MCP**, termasuk ekspor file, workflow dengan checkpoint, penyusunan DOCX melalui WordCraft, dan aksi UI dengan pemeriksaan hasil. Penalaran AI berlangsung di ChatGPT; agent Windows menjalankan tindakan melalui Rust.
+Versi **0.5.1** menyediakan **43 tools MCP**, termasuk ekspor file, workflow dengan checkpoint, penyusunan DOCX melalui WordCraft, dan aksi UI dengan pemeriksaan hasil. Penalaran AI berlangsung di ChatGPT; agent Windows menjalankan tindakan melalui Rust.
 
 </td>
 </tr>
@@ -51,18 +51,20 @@ Versi **0.5.0** menyediakan **42 tools MCP**, termasuk ekspor file, workflow den
 | 🔁 | Workflow | Hingga 20 langkah berurutan, checkpoint tersimpan, pemeriksaan hasil, dan pelanjutan langkah yang sudah selesai. |
 | 🔐 | Izin lokal | Pairing, OAuth, folder yang disetujui, allowlist aplikasi, dan konfirmasi native tindakan sensitif secara default. |
 
+Riwayat tugas otomatis dibersihkan setelah satu jam tanpa penggunaan MCP dan tidak ada tugas aktif. Heartbeat tidak memperpanjang waktu ini. Pairing, izin lokal, dan file kerja tetap disimpan.
+
 ## Unduh dan mulai
 
 Semua berkas ada di **[GitHub Releases](https://github.com/NoHeart6/open/releases/latest)**. Binary Windows diterbitkan sebagai aset rilis; source tersedia di repository ini.
 
 | Unduhan | Kegunaan |
 | :-- | :-- |
-| [OpenCommanderSetup.exe](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommanderSetup.exe) | Installer Windows x64 dari build Rust 0.5.0. |
-| [opencommander-agent.exe](https://github.com/NoHeart6/open/releases/download/v0.5.0/opencommander-agent.exe) | Executable agent Rust untuk penggunaan manual; lihat `--help`. |
-| [OpenCommander-Windows-0.5.0.zip](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommander-Windows-0.5.0.zip) | Installer, agent, petunjuk instalasi, dan lisensi dependency. |
-| [OpenCommander-plugin-0.5.0.zip](https://github.com/NoHeart6/open/releases/download/v0.5.0/OpenCommander-plugin-0.5.0.zip) | Manifest MCP dan skill kontrol Windows/WordCraft untuk host yang mendukung format plugin ini. |
-| [WordCraft 0.7.0 portable](https://github.com/NoHeart6/open/releases/download/v0.5.0/wordcraft-0.7.0-windows-x64-portable.zip) | `wordcraft.exe`, `wordcraft-cli.exe`, dan lisensi upstream. |
-| [SHA256SUMS.txt](https://github.com/NoHeart6/open/releases/download/v0.5.0/SHA256SUMS.txt) | Checksum seluruh aset unduhan. |
+| [OpenCommanderSetup.exe](https://github.com/NoHeart6/open/releases/download/v0.5.1/OpenCommanderSetup.exe) | Installer Windows x64 dari build Rust 0.5.1. |
+| [opencommander-agent.exe](https://github.com/NoHeart6/open/releases/download/v0.5.1/opencommander-agent.exe) | Executable agent Rust untuk penggunaan manual; lihat `--help`. |
+| [OpenCommander-Windows-0.5.1.zip](https://github.com/NoHeart6/open/releases/download/v0.5.1/OpenCommander-Windows-0.5.1.zip) | Installer, agent, petunjuk instalasi, dan lisensi dependency. |
+| [OpenCommander-plugin-0.5.1.zip](https://github.com/NoHeart6/open/releases/download/v0.5.1/OpenCommander-plugin-0.5.1.zip) | Manifest MCP dan skill kontrol Windows/WordCraft untuk host yang mendukung format plugin ini. |
+| [WordCraft 0.7.0 portable](https://github.com/NoHeart6/open/releases/download/v0.5.1/wordcraft-0.7.0-windows-x64-portable.zip) | `wordcraft.exe`, `wordcraft-cli.exe`, dan lisensi upstream. |
+| [SHA256SUMS.txt](https://github.com/NoHeart6/open/releases/download/v0.5.1/SHA256SUMS.txt) | Checksum seluruh aset unduhan. |
 
 1. **Pasang agent.** Jalankan `OpenCommanderSetup.exe`, lalu buka UI OpenCommander untuk pairing dan mengatur akses. Untuk upgrade, gunakan `OpenCommanderSetup.exe --upgrade`; pairing dan kebijakan lokal dipertahankan.
 2. **Hubungkan plugin.** Buka [halaman Plugins ChatGPT](https://chatgpt.com/plugins), tambahkan server MCP kustom berikut, pilih OAuth, lalu login dan pasangkan perangkat.
@@ -93,7 +95,7 @@ Paket plugin ZIP disediakan bersama [panduan akses](docs/PLUGIN_ACCESS.md). Kete
   <sub>Tampilan contoh dari proyek WordCraft upstream, bukan rekaman workflow ChatGPT.</sub>
 </p>
 
-Ekstrak [WordCraft portable](https://github.com/NoHeart6/open/releases/download/v0.5.0/wordcraft-0.7.0-windows-x64-portable.zip) ke folder pilihan Anda. Dari folder yang berisi executable, jalankan:
+Ekstrak [WordCraft portable](https://github.com/NoHeart6/open/releases/download/v0.5.1/wordcraft-0.7.0-windows-x64-portable.zip) ke folder pilihan Anda. Dari folder yang berisi executable, jalankan:
 
 ```powershell
 .\wordcraft.exe --control 7981
@@ -136,7 +138,7 @@ Instalasi baru menggunakan folder terbatas, allowlist aplikasi, dan konfirmasi t
 | :-- | :-- |
 | [Instalasi Windows](docs/INSTALL_WINDOWS.md) | Pairing, izin, terminal, media, WordCraft, dan workflow. |
 | [Akses plugin](docs/PLUGIN_ACCESS.md) | Koneksi ChatGPT, isi ZIP, konfigurasi MCP, dan WordCraft lokal. |
-| [Catatan rilis 0.5.0](docs/releases/v0.5.0.md) | Isi unduhan, asal binary, dan verifikasi paket. |
+| [Catatan rilis 0.5.1](docs/releases/v0.5.1.md) | Isi unduhan, asal binary, dan verifikasi paket. |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnosis koneksi dan masalah umum. |
 | [Validasi ChatGPT](docs/VALIDATION_CHATGPT.md) | Membedakan pengujian klien MCP dari bukti pada host ChatGPT. |
 

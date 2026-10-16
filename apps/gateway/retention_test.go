@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestOutputRetentionPreservesRunningAndRecentTasks(t *testing.T) {
+func TestIdleHistoryCleanupWaitsForOneHourAndActiveTasks(t *testing.T) {
 	s, h := fixture(t)
 	device, _ := pair(t, s, h)
 	now := time.Now().Unix()
@@ -26,10 +26,13 @@ func TestOutputRetentionPreservesRunningAndRecentTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.pruneOutput(now); err != nil {
+	if _, err := s.db.Exec("UPDATE mcp_activity SET last_used=? WHERE owner='alice'", now-3599); err != nil {
 		t.Fatal(err)
 	}
-	for id, expected := range map[string]int{"old-finished": 0, "recent-finished": 1, "old-running": 1} {
+	if err := s.pruneHistory(now); err != nil {
+		t.Fatal(err)
+	}
+	for id, expected := range map[string]int{"old-finished": 1, "recent-finished": 1, "old-running": 1} {
 		var count int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM task_output WHERE task_id=?", id).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -37,9 +40,66 @@ func TestOutputRetentionPreservesRunningAndRecentTasks(t *testing.T) {
 		if count != expected {
 			t.Fatalf("%s: retained %d, want %d", id, count, expected)
 		}
-		if _, err := s.task("alice", id); err != nil {
-			t.Fatalf("retention must preserve task identity: %v", err)
+	}
+	if _, err := s.db.Exec("UPDATE mcp_activity SET last_used=? WHERE owner='alice'", now-3600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pruneHistory(now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.task("alice", "old-finished"); err != nil {
+		t.Fatal("active task must defer all history cleanup", err)
+	}
+	if _, err := s.db.Exec("UPDATE tasks SET status='succeeded' WHERE id='old-running'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pruneHistory(now); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"tasks", "task_output", "audit"} {
+		var count int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			t.Fatal(err)
 		}
+		if count != 0 {
+			t.Fatalf("%s retained %d history rows", table, count)
+		}
+	}
+	if !s.owned("alice", device) {
+		t.Fatal("cleanup removed pairing")
+	}
+}
+
+func TestMCPReadsResetIdleHistoryAndOtherAccountsDoNot(t *testing.T) {
+	s, h := fixture(t)
+	device, _ := pair(t, s, h)
+	_, result := request(t, s, h, "POST", "/api/tasks", "alice", taskBody(device, "idle-read-test"))
+	id := result["task_id"].(string)
+	now := time.Now().Unix()
+	if _, err := s.db.Exec("UPDATE tasks SET status='succeeded' WHERE id=?", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE mcp_activity SET last_used=? WHERE owner='alice'", now-3600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := request(t, s, h, "GET", "/api/tasks/"+id, "alice", nil); code != 200 {
+		t.Fatal(code)
+	}
+	if err := s.pruneHistory(now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.task("alice", id); err != nil {
+		t.Fatal("status polling did not reset inactivity", err)
+	}
+	if _, err := s.db.Exec("UPDATE mcp_activity SET last_used=? WHERE owner='alice'", now-3600); err != nil {
+		t.Fatal(err)
+	}
+	request(t, s, h, "GET", "/api/devices", "mallory", nil)
+	if err := s.pruneHistory(now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.task("alice", id); err == nil {
+		t.Fatal("another account extended retention")
 	}
 }
 

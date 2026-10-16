@@ -340,6 +340,17 @@ func TestRoutingSignatureHeartbeatAndProofReplay(t *testing.T) {
 	if hello["type"] != "hello" {
 		t.Fatal(hello)
 	}
+	activity := float64(timestamp - 300)
+	if _, err := s.db.Exec("UPDATE mcp_activity SET last_used=? WHERE owner='alice'", int64(activity)); err != nil {
+		t.Fatal(err)
+	}
+	if err = conn.WriteJSON(map[string]string{"type": "heartbeat"}); err != nil {
+		t.Fatal(err)
+	}
+	var heartbeat map[string]any
+	if err = conn.ReadJSON(&heartbeat); err != nil || heartbeat["type"] != "heartbeat" || heartbeat["mcp_activity_at"] != activity {
+		t.Fatalf("heartbeat changed MCP inactivity: %v %v", heartbeat, err)
+	}
 	replay, res, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(h.URL, "http")+"/v1/agent", headers)
 	if replay != nil {
 		replay.Close()
@@ -368,12 +379,18 @@ func TestRoutingSignatureHeartbeatAndProofReplay(t *testing.T) {
 	if stored, err := s.task("alice", a["task_id"].(string)); err != nil || stored.Status != "succeeded" {
 		t.Fatal("ACK preceded durable result", err)
 	}
+	if _, err := s.db.Exec("UPDATE mcp_activity SET last_used=? WHERE owner='alice'", int64(activity)); err != nil {
+		t.Fatal(err)
+	}
 	conn.WriteJSON(map[string]any{"type": "result", "task_id": a["task_id"], "status": "succeeded", "result": map[string]string{"source": "duplicate-must-not-overwrite"}})
 	if err = conn.ReadJSON(&ack); err != nil || ack["type"] != "ack" {
 		t.Fatal("lost ACK reconciliation failed", ack, err)
 	}
 	if stored, _ := s.task("alice", a["task_id"].(string)); strings.Contains(string(stored.Result), "duplicate") {
 		t.Fatal("terminal result overwritten")
+	}
+	if at, err := s.historyActivity("alice"); err != nil || at != int64(activity) {
+		t.Fatal("retransmission reset MCP inactivity", at, err)
 	}
 	for i := 0; i < 20; i++ {
 		_, v := request(t, s, h, "GET", "/api/tasks/"+a["task_id"].(string), "alice", nil)
