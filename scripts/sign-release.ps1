@@ -1,5 +1,6 @@
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path $PSScriptRoot -Parent
+& (Join-Path $PSScriptRoot 'check-version.ps1')
 $keyRoot=Join-Path $repoRoot '.runtime/releases'
 $ciphertext=Get-Content -LiteralPath (Join-Path $keyRoot 'release-key.dpapi.txt') -Raw
 $private=[Net.NetworkCredential]::new('',(ConvertTo-SecureString $ciphertext.Trim())).Password

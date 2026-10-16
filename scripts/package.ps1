@@ -1,5 +1,6 @@
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path $PSScriptRoot -Parent
+& (Join-Path $PSScriptRoot 'check-version.ps1')
 $artifactRoot=Join-Path $repoRoot artifacts
 $version=(Select-String -LiteralPath (Join-Path $repoRoot 'apps/windows-agent/Cargo.toml') -Pattern '^version = "([0-9.]+)"$').Matches[0].Groups[1].Value
 $licenseRoot=Join-Path $artifactRoot 'licenses'

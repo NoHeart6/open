@@ -14,7 +14,7 @@ Terminal mendukung empat task bersamaan. `terminal_execute` dengan `interactive=
 
 Proses yang selesai normal memiliki status task `succeeded`; periksa `exit_code` dan `program_succeeded` untuk hasil programnya. `success_exit_codes` default `[0]`; untuk pilihan normal `choice`, tetapkan kode yang diterima, misalnya `[1,2]`. Kegagalan peluncuran dan timeout tetap gagal, sedangkan pembatalan memiliki status `cancelled`.
 
-Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v0.5.0 memuat 42 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
+Setelah pembaruan schema/tool, buka koneksi OpenCommander pada halaman Plugin ChatGPT, pilih **Refresh**, lalu buat percakapan baru. Daftar MCP v1.0.2 memuat 42 tools, termasuk `terminal_screen` dan `wordcraft`. Jalankan WordCraft dengan `--control 7981`, lalu gunakan tool `wordcraft` dengan path absolut ke `wordcraft-cli.exe` untuk memanggil MCP bawaan WordCraft. Hanya dokumen dalam approved root dan perintah editor yang diizinkan dapat digunakan.
 
 Metadata rilis memakai tanda tangan Ed25519 dan checksum SHA-256. Executable belum ditandatangani Authenticode.
 
@@ -48,11 +48,11 @@ Jika `destination` tidak ditentukan, file masuk `%USERPROFILE%\Pictures\OpenComm
 **Batas platform**: ChatGPT menentukan apakah file dari sebuah tool/generator tersedia untuk `openai/fileParams`. Plugin tidak dapat membaca file internal `sandbox:/...` hanya dari path atau ID yang tidak diberi download URL. Jika host tidak memberikan `download_url`, tool perlu dukungan API host tersebut; jangan menjanjikan transfer otomatis tanpa tes di chat aktual.
 
 
-## Pembersihan riwayat otomatis (0.5.1)
+## Pembersihan riwayat otomatis (1.0.2)
 
 Setelah satu jam tanpa penggunaan MCP dan tidak ada tugas aktif, agent menghapus jurnal tugas, hasil, keluaran terminal, dan log aktivitas. Gateway juga menghapus catatan tugas, keluaran, dan log aktivitas akun yang tidak aktif. Pemanggilan tool, pembacaan status/output, dan eksekusi tugas memperbarui waktu aktivitas; heartbeat koneksi tidak. Pemeriksaan berjalan setiap sekitar 10 detik saat terhubung, juga saat reconnect dan sebelum pemulihan startup untuk membersihkan jurnal lama yang penuh. Pairing, izin lokal, file kerja, trash, dan receipt undo dipertahankan. Riwayat yang sudah dihapus tidak dapat dibaca kembali; periksa keadaan aktual sebelum mengulangi tindakan lama.
 
-## OpenCommander 0.5.0: bidirectional workflow + smart editor + visual computer
+## OpenCommander 1.0.2: bidirectional workflow + smart editor + visual computer
 
 - `file_export` reads binary Windows file data **back into ChatGPT** in exact 48 KiB Base64 chunks; `op=info` returns original name, size and SHA-256, `op=chunk` returns bounded bytes and next_offset. Maximum file size 512 MiB. For large files, a caller must request successive chunks: this is not yet an automatic ChatGPT-host file attachment/upload mechanism.
 - `workflow` runs up to 20 ordered steps with persistent checkpoint (`checkpoint_path`). `op=preview` previews validated actions; `op=run` executes; `op=status` inspects progress. Each step has `id`, `action` and `args`, and optional postcondition `verify: {type: exists|sha256|contains|wordcraft_image, path?, value?}`. A completed step never reruns when the same plan is retried. If a step fails, execution halts and must be explicitly retried with `retry_failed_step=true`; interrupted/uncertain outcomes require `retry_uncertain_step=true` after inspecting side effects. No arbitrary shell commands are allowed as workflow steps.

@@ -261,7 +261,7 @@ mod native {
             };
         }
         format!(
-            "Version: {}\r\nComputer: {}\r\nState directory: {}\r\nRemote access mode: {}\r\nPaired: {}\r\nNo credentials are included in diagnostics.\r\nActivity logs rotate at 2 MiB; acknowledged task journals retain seven days.",
+            "Version: {}\r\nComputer: {}\r\nState directory: {}\r\nRemote access mode: {}\r\nPaired: {}\r\nNo credentials are included in diagnostics.\r\nActivity logs rotate at 2 MiB; task history is cleared after one hour without MCP use when no tasks are active.",
             env!("CARGO_PKG_VERSION"),
             sysinfo::System::host_name().unwrap_or_default(),
             ctx.state.display(),

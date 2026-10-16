@@ -1,6 +1,7 @@
 param([switch]$Release)
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path $PSScriptRoot -Parent
+& (Join-Path $PSScriptRoot 'check-version.ps1')
 New-Item -ItemType Directory -Path (Join-Path $repoRoot artifacts) -Force | Out-Null
 if(Test-Path (Join-Path $repoRoot 'infra/releases/trusted-key.json')){$env:OPENCOMMANDER_RELEASE_PUBLIC_KEY=(Get-Content (Join-Path $repoRoot 'infra/releases/trusted-key.json') -Raw | ConvertFrom-Json).public_key_hex}
 if(Test-Path "$env:USERPROFILE\.cargo\bin"){$env:Path="$env:USERPROFILE\.cargo\bin;"+$env:Path}

@@ -27,6 +27,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const gatewayVersion = "1.0.2"
+
 type Config struct {
 	Addr, PublicAddr, Database, BridgeKey, SigningSeed string
 	Dev                                                bool
@@ -172,7 +174,7 @@ func (s *Server) handler() http.Handler {
 			fail(w, 503, "storage unavailable")
 			return
 		}
-		respond(w, 200, map[string]any{"status": "ok", "protocol": "1", "version": "0.5.1", "history_idle_seconds": historyIdleSeconds})
+		respond(w, 200, map[string]any{"status": "ok", "protocol": "1", "version": gatewayVersion, "history_idle_seconds": historyIdleSeconds})
 	})
 	mux.HandleFunc("POST /v1/enroll", s.enroll)
 	mux.HandleFunc("POST /v1/enroll/{id}/poll", s.pollEnrollment)
