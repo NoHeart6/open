@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 
 .place_backups/
+
+.studio_suite/

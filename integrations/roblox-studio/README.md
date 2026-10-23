@@ -115,3 +115,6 @@ References:
 
 ## Version 5.0
 Open now supports editor and runtime assertions, error diagnosis, guarded repair-and-verify with automatic source rollback, and SHA-256 verified recovery copies of saved .rbxl/.rbxlx places. See [V5_GUIDE.md](V5_GUIDE.md) for safety constraints, commands and tests.
+
+## Unified Developer Suite 6.0
+Includes 26 operations for project scanning, debugging, GUI/world generation, local sandbox simulations, tests, visual comparison, accessibility audits and release gates. See [DEVELOPER_SUITE.md](DEVELOPER_SUITE.md) for examples and limitations.

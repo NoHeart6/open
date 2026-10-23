@@ -11,7 +11,7 @@ local StudioTest = game:GetService("StudioTestService")
 local DeviceSimulator = game:GetService("StudioDeviceSimulatorService")
 local LogService = game:GetService("LogService")
 local RunService = game:GetService("RunService")
-local BRIDGE_VERSION = "5.0.0"
+local BRIDGE_VERSION = "6.0.0"
 local BASE = "http://127.0.0.1:34872"
 local TOKEN = "__BRIDGE_TOKEN__"
 local CLIENT = HttpService:GenerateGUID(false)
@@ -661,6 +661,67 @@ local function handle(command, insideBatch)
     local op = command.op
     if op == "ping" then
         return {pong = true, place = game.Name, placeId = game.PlaceId, client = CLIENT, version = BRIDGE_VERSION}
+    elseif op == "suite_manifest" then
+        local nodes = {}
+        local maxNodes = math.clamp(tonumber(command.limit) or 700, 1, 1000)
+        local maxSource = math.clamp(tonumber(command.source_limit) or 5000, 0, 12000)
+        local roots = {"ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui",
+            "StarterPlayer", "StarterPack", "ReplicatedFirst", "SoundService", "Lighting",
+            "Teams", "Chat", "Workspace"}
+        local sourceBytes = 0
+        local scripts, remotes, ui = 0, 0, 0
+        local truncated = false
+        for _, name in ipairs(roots) do
+            local ok, root = pcall(function() return game:GetService(name) end)
+            if ok then
+                for _, node in ipairs(root:GetDescendants()) do
+                    if #nodes >= maxNodes then truncated=true break end
+                    local item = {path=getPath(node), name=node.Name, class=node.ClassName}
+                    if node:IsA("LuaSourceContainer") then
+                        scripts += 1
+                        local readOK, source = pcall(editorSource, node)
+                        if readOK then
+                            local available = math.max(0, 380000 - sourceBytes)
+                            local length = math.min(maxSource, available)
+                            if length > 0 then
+                                item.source = string.sub(source, 1, length)
+                                sourceBytes += #(item.source)
+                            end
+                            item.sourceTruncated = #source > length
+                        end
+                    end
+                    if node:IsA("RemoteEvent") or node:IsA("RemoteFunction") then remotes += 1 end
+                    if node:IsA("GuiObject") then
+                        ui += 1
+                        item.visible=node.Visible
+                        item.sizeX=node.AbsoluteSize.X
+                        item.sizeY=node.AbsoluteSize.Y
+                        if node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox") then
+                            item.text=string.sub(node.Text,1,160)
+                            item.textSize=node.TextSize
+                        end
+                    end
+                    table.insert(nodes,item)
+                end
+            end
+            if truncated then break end
+        end
+        return {version=BRIDGE_VERSION, nodes=nodes, total=#nodes, scripts=scripts,
+            remotes=remotes, ui=ui, truncated=truncated, sourceBytes=sourceBytes,
+            note="Bounded editor snapshot; some scripts may be truncated or inaccessible."}
+    elseif op == "suite_perf" then
+        local Stats = game:GetService("Stats")
+        local count, scripts, parts, ui = 0, 0, 0, 0
+        for _, node in ipairs(game:GetDescendants()) do
+            count+=1
+            if node:IsA("LuaSourceContainer") then scripts+=1 end
+            if node:IsA("BasePart") then parts+=1 end
+            if node:IsA("GuiObject") then ui+=1 end
+        end
+        local ok, memory=pcall(function() return Stats:GetTotalMemoryUsageMb() end)
+        return {objects=count, scripts=scripts, parts=parts, ui=ui,
+            memoryMb=ok and memory or nil, running=RunService:IsRunning(),
+            note="Studio snapshot only, not FPS/latency profiling or a production performance benchmark."}
     elseif op == "assert_state" then
         return assertChecks(command.checks)
     elseif op == "run_state" then
@@ -803,7 +864,7 @@ local function handle(command, insideBatch)
                 "properties", "get_attributes", "tags", "read_script", "script_search", "create",
                 "update", "set_script", "replace_script", "open_script", "delete", "move", "duplicate",
                 "select", "set_attributes", "set_tags", "pivot", "terrain_fill", "terrain_clear",
-                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop", "playtest_start", "playtest_status", "ui_scan", "assert_state", "device_list", "device_status", "device_select", "device_resolution", "device_orientation", "device_stop"},
+                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop", "playtest_start", "playtest_status", "ui_scan", "assert_state", "suite_manifest", "suite_perf", "device_list", "device_status", "device_select", "device_resolution", "device_orientation", "device_stop"},
             note = "Edit-mode data model only; saving, publishing and gameplay tests use Studio UI."}
     elseif op == "find" then
         local root = resolve(command.root or "game")
@@ -1093,7 +1154,7 @@ local function execute(command)
         tree = true, find = true, selection = true, properties = true,
         get_attributes = true, tags = true, read_script = true, script_search = true,
         run_state = true, logs = true, diagnostics = true, logs_clear = true,
-        playtest_start = true, playtest_status = true, ui_scan = true, assert_state = true, device_list = true, device_status = true,
+        playtest_start = true, playtest_status = true, ui_scan = true, assert_state = true, suite_manifest = true, suite_perf = true, device_list = true, device_status = true,
         device_select = true, device_resolution = true, device_orientation = true, device_stop = true,
         test_run = true, test_pause = true, test_resume = true, test_stop = true,
         open_script = true, undo = true, redo = true}

@@ -511,6 +511,15 @@ def send(args):
         result=repair_verify(command)
         print(json.dumps({"state":"done","result":result},ensure_ascii=False,indent=2))
         return
+    if op.startswith("suite_"):
+        import developer_suite_core as suite_core
+        import developer_suite_workflows as suite_workflows
+        function=suite_core.HANDLERS.get(op) or suite_workflows.HANDLERS.get(op)
+        if not function:
+            raise ValueError("Unknown developer suite operation")
+        result=function(command,studio_command)
+        print(json.dumps({"state":"done","result":result},ensure_ascii=False,indent=2))
+        return
     if op=="snapshot_script":
         data=studio_command({"op":"read_script","path":command["path"]})
         print(json.dumps({"state":"done","result":snapshot_script_data(data)},indent=2))
