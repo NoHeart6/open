@@ -7,9 +7,11 @@ local History = game:GetService("ChangeHistoryService")
 local ScriptEditor = game:GetService("ScriptEditorService")
 local Tags = game:GetService("CollectionService")
 local InsertService = game:GetService("InsertService")
+local StudioTest = game:GetService("StudioTestService")
+local DeviceSimulator = game:GetService("StudioDeviceSimulatorService")
 local LogService = game:GetService("LogService")
 local RunService = game:GetService("RunService")
-local BRIDGE_VERSION = "3.0.1"
+local BRIDGE_VERSION = "4.0.0"
 local BASE = "http://127.0.0.1:34872"
 local TOKEN = "__BRIDGE_TOKEN__"
 local CLIENT = HttpService:GenerateGUID(false)
@@ -274,6 +276,232 @@ local function matches(haystack, query, caseSensitive)
     return string.find(haystack, query, 1, true) ~= nil
 end
 
+
+-- Studio Test Service yields until EndTest. Keep polling requests in a separate coroutine.
+local studioTests = {}
+local activeStudioTest = nil
+
+local SERVER_TEST_SOURCE = [==[
+local Players = game:GetService("Players")
+local StudioTest = game:GetService("StudioTestService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local config = ReplicatedStorage:WaitForChild("__OPEN_TEST_CONFIG__")
+local remote = ReplicatedStorage:WaitForChild("__OPEN_TEST_REMOTE__")
+local settings = HttpService:JSONDecode(config.Value)
+local events = {}
+local started = os.clock()
+local seen = {}
+for _, player in ipairs(Players:GetPlayers()) do seen[player.Name]=true end
+Players.PlayerAdded:Connect(function(player) seen[player.Name]=true end)
+remote.OnServerEvent:Connect(function(player, item)
+    if #events >= 150 then return end
+    if type(item) ~= "table" then return end
+    table.insert(events, {player=player.Name, event=tostring(item.event):sub(1,60),
+        result=tostring(item.result):sub(1,300)})
+end)
+task.spawn(function()
+    local duration = math.clamp(tonumber(settings.duration) or 10, 3, 90)
+    task.wait(duration)
+    local names = {}
+    for _, player in ipairs(Players:GetPlayers()) do table.insert(names, player.Name) end
+    local observed = {}
+    for name in pairs(seen) do table.insert(observed,name) end
+    local expected = settings.mode == "run" and 0 or (tonumber(settings.players) or 1)
+    local passed = #observed >= expected
+    for _, item in ipairs(events) do
+        if item.event == "input_error" or item.event == "ui_missing" then passed = false end
+    end
+    local result = {success=passed, players=#observed, expectedPlayers=expected,
+        playerNames=observed, livePlayers=#names,
+        events=events, duration=os.clock()-started, mode=tostring(settings.mode),
+        note="Server harness result. Client telemetry is best-effort."}
+    local ok, err = pcall(function() StudioTest:EndTest(result) end)
+    if not ok then warn("OPEN_BRIDGE_TEST_END_ERROR " .. tostring(err)) end
+end)
+]==]
+
+local CLIENT_TEST_SOURCE = [==[
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local config = ReplicatedStorage:WaitForChild("__OPEN_TEST_CONFIG__")
+local remote = ReplicatedStorage:WaitForChild("__OPEN_TEST_REMOTE__")
+local settings = HttpService:JSONDecode(config.Value)
+local player = Players.LocalPlayer
+if not player then return end
+local function report(event, result)
+    pcall(function() remote:FireServer({event=event, result=tostring(result)}) end)
+end
+task.wait(1.5)
+report("client_ready", tostring(player.Name))
+local gui = player:WaitForChild("PlayerGui", 7)
+if gui then
+    local ready = false
+    for _ = 1, 12 do
+        for _, node in ipairs(gui:GetDescendants()) do
+            if node:IsA("GuiObject") then ready = true break end
+        end
+        if ready or not (settings.expectedUiMin and settings.expectedUiMin > 0) then
+            break
+        end
+        task.wait(0.45)
+    end
+    local checked, outside = 0, 0
+    for _, node in ipairs(gui:GetDescendants()) do
+        if node:IsA("GuiObject") and node.Visible and checked < 150 then
+            checked += 1
+            local pos, size = node.AbsolutePosition, node.AbsoluteSize
+            local camera = workspace.CurrentCamera
+            local viewport = camera and camera.ViewportSize or Vector2.new(0,0)
+            if viewport.X > 0 and viewport.Y > 0 and size.X > 1 and size.Y > 1 then
+                if pos.X + size.X < 0 or pos.Y + size.Y < 0 or pos.X > viewport.X or pos.Y > viewport.Y then
+                    outside += 1
+                    report("gui_outside", node:GetFullName())
+                end
+            end
+        end
+    end
+    report("ui_audit", "checked=" .. checked .. ";outside=" .. outside)
+    if checked < (tonumber(settings.expectedUiMin) or 0) then
+        report("ui_missing", "expected=" .. tostring(settings.expectedUiMin) .. ";observed=" .. checked)
+    end
+else
+    report("ui_missing", "PlayerGui did not load")
+end
+local steps = settings.steps or {}
+if #steps > 0 then
+    local ok, vi = pcall(function() return UIS:CreateVirtualInput() end)
+    if not ok or not vi then
+        report("input_error", "VirtualInput unavailable: " .. tostring(vi))
+    else
+        for i, step in ipairs(steps) do
+            task.wait(math.clamp(tonumber(step.delay) or 0.1, 0, 3))
+            local worked, err = pcall(function()
+                if step.type == "text" then
+                    vi:SendTextInput(tostring(step.text):sub(1,120))
+                elseif step.type == "key" then
+                    local key = Enum.KeyCode[tostring(step.key)]
+                    if not key then error("Invalid key") end
+                    vi:SendKey(true, key, false)
+                    task.wait(0.09)
+                    vi:SendKey(false, key, false)
+                elseif step.type == "click" then
+                    local pt = Vector2.new(tonumber(step.x) or 0, tonumber(step.y) or 0)
+                    vi:SendMousePosition(pt)
+                    vi:SendMouseButton(pt, Enum.UserInputType.MouseButton1, true, 0)
+                    task.wait(0.09)
+                    vi:SendMouseButton(pt, Enum.UserInputType.MouseButton1, false, 0)
+                else
+                    error("Unsupported input step")
+                end
+            end)
+            report(worked and "input_ok" or "input_error", tostring(i) .. ":" .. tostring(err))
+        end
+    end
+end
+report("client_done", player.Name)
+]==]
+
+local function cleanupTestParts(names)
+    for _, item in ipairs(names) do
+        pcall(function() if item and item.Parent then item:Destroy() end end)
+    end
+end
+
+local function prepareStudioTest(payload)
+    local serverRoot = game:GetService("ServerScriptService")
+    local clientRoot = game:GetService("StarterPlayer"):WaitForChild("StarterPlayerScripts")
+    local replicated = game:GetService("ReplicatedStorage")
+    local created = {}
+    local ok, err = pcall(function()
+        for _, entry in ipairs({
+            {parent=replicated, class="StringValue", name="__OPEN_TEST_CONFIG__"},
+            {parent=replicated, class="RemoteEvent", name="__OPEN_TEST_REMOTE__"},
+            {parent=serverRoot, class="Script", name="__OPEN_TEST_SERVER__"},
+            {parent=clientRoot, class="LocalScript", name="__OPEN_TEST_CLIENT__"}
+        }) do
+            if entry.parent:FindFirstChild(entry.name) then
+                error("Reserved test item already present: " .. entry.name)
+            end
+            local obj=Instance.new(entry.class)
+            obj.Name=entry.name
+            obj.Parent=entry.parent
+            table.insert(created,obj)
+        end
+        created[1].Value=HttpService:JSONEncode(payload)
+        ScriptEditor:UpdateSourceAsync(created[3],function() return SERVER_TEST_SOURCE end)
+        ScriptEditor:UpdateSourceAsync(created[4],function() return CLIENT_TEST_SOURCE end)
+    end)
+    if not ok then cleanupTestParts(created); error(err) end
+    return created
+end
+
+local function beginStudioTest(command)
+    if activeStudioTest then error("A Studio test is already active") end
+    if not StudioTest.EditModeActive then error("Studio must be in Edit mode") end
+    if command.confirm_persistent_changes ~= true then
+        error("Confirm test in a saved disposable place: confirm_persistent_changes=true")
+    end
+    local mode = command.mode or "play"
+    if mode ~= "play" and mode ~= "multiplayer" and mode ~= "run" then error("Unknown test mode") end
+    local players = math.floor(tonumber(command.players) or 2)
+    if players < 1 or players > 8 then error("players must be 1..8") end
+    local duration = math.clamp(tonumber(command.duration) or (mode=="multiplayer" and 24 or 9),
+        mode=="multiplayer" and 18 or 3, 90)
+    local steps = command.steps or {}
+    if type(steps) ~= "table" or #steps > 25 then error("steps supports at most 25 actions") end
+    for _, step in ipairs(steps) do
+        if type(step) ~= "table" or (step.type ~= "key" and step.type ~= "click" and step.type ~= "text") then
+            error("Unsupported input step; use type key/click/text")
+        end
+        if step.type == "click" and (type(step.x) ~= "number" or type(step.y) ~= "number" or
+            step.x < 0 or step.y < 0 or step.x > 7680 or step.y > 4320) then
+            error("Invalid click coordinates")
+        end
+        if step.type == "text" and (type(step.text) ~= "string" or #step.text > 120) then
+            error("Text step limited to 120 characters")
+        end
+    end
+    local id = HttpService:GenerateGUID(false)
+    local expectedUiMin=math.clamp(math.floor(tonumber(command.expected_ui_min) or 0),0,150)
+    local payload = {mode=mode, duration=duration, steps=steps, id=id,
+        expectedUiMin=expectedUiMin,
+        players=mode=="multiplayer" and players or (mode=="run" and 0 or 1)}
+    local parts=prepareStudioTest(payload)
+    local record = {id=id, state="running", mode=mode, players=mode=="multiplayer" and players or 1,
+        created=os.time(), duration=duration}
+    studioTests[id]=record
+    activeStudioTest=id
+    task.spawn(function()
+        local ok, result=pcall(function()
+            if mode=="multiplayer" then
+                return StudioTest:ExecuteMultiplayerTestAsync(players,payload)
+            elseif mode=="run" then
+                return StudioTest:ExecuteRunModeAsync(payload)
+            else
+                return StudioTest:ExecutePlayModeAsync(payload)
+            end
+        end)
+        record.state=ok and "done" or "failed"
+        record.result=ok and result or nil
+        record.error=not ok and tostring(result) or nil
+        record.finished=os.time()
+        cleanupTestParts(parts)
+        activeStudioTest=nil
+    end)
+    return {id=id, state="running", mode=mode, duration=duration,
+        warning="Test may temporarily interrupt Studio plugin polling while player windows start."}
+end
+
+local function studioTestStatus(id)
+    local record=studioTests[id or activeStudioTest]
+    if not record then return {active=activeStudioTest, error="Test not found"} end
+    return {id=record.id, state=record.state, mode=record.mode, players=record.players,
+        duration=record.duration, result=record.result, error=record.error, finished=record.finished}
+end
+
 local function handle(command, insideBatch)
     if type(command) ~= "table" or type(command.op) ~= "string" then error("Missing op") end
     local op = command.op
@@ -346,6 +574,65 @@ local function handle(command, insideBatch)
         RunService:Stop()
         simulationOwned = false
         return {stopped = true, worldRestored = false}
+    elseif op == "playtest_start" then
+        return beginStudioTest(command)
+    elseif op == "playtest_status" then
+        return studioTestStatus(command.id)
+    elseif op == "ui_scan" then
+        local root=resolve(command.root or "StarterGui")
+        local limit=math.clamp(tonumber(command.limit) or 80,1,150)
+        local items={}
+        for _, node in ipairs(root:GetDescendants()) do
+            if node:IsA("GuiObject") then
+                local pos, size=node.AbsolutePosition,node.AbsoluteSize
+                table.insert(items,{path=getPath(node),class=node.ClassName,visible=node.Visible,
+                    position=encodeValue(pos),size=encodeValue(size)})
+            end
+            if #items>=limit then break end
+        end
+        local camera=workspace.CurrentCamera
+        return {root=getPath(root),count=#items,items=items,
+            viewport=camera and encodeValue(camera.ViewportSize) or nil,
+            note="Edit-mode layout may differ from each player's PlayerGui. Use playtest with expected_ui_min for client assertions."}
+    elseif op == "device_list" then
+        local ids=DeviceSimulator:GetDeviceListAsync()
+        local output={}
+        for i, id in ipairs(ids) do
+            if i>45 then break end
+            local ok, info=pcall(function() return DeviceSimulator:GetDeviceInfoAsync(id) end)
+            table.insert(output,{id=id, name=ok and info.Name or id, width=ok and info.Width or nil,
+                height=ok and info.Height or nil, form=ok and tostring(info.DeviceForm) or nil})
+        end
+        return {current=DeviceSimulator:GetDeviceAsync(),devices=output}
+    elseif op == "device_status" then
+        local id=DeviceSimulator:GetDeviceAsync()
+        local result={device=id}
+        if id~="default" then
+            result.resolution=encodeValue(DeviceSimulator:GetResolutionAsync())
+            result.orientation=tostring(DeviceSimulator:GetOrientationAsync())
+            result.density=DeviceSimulator:GetPixelDensityAsync()
+        end
+        return result
+    elseif op == "device_select" then
+        if type(command.device_id)~="string" then error("device_id required") end
+        DeviceSimulator:SetDeviceAsync(command.device_id)
+        return {device=DeviceSimulator:GetDeviceAsync()}
+    elseif op == "device_resolution" then
+        local w,h=tonumber(command.width),tonumber(command.height)
+        if not w or not h or w<1 or h<1 or w>7680 or h>4320 then error("Invalid device resolution") end
+        DeviceSimulator:SetResolutionAsync(math.floor(w),math.floor(h))
+        return {resolution=encodeValue(DeviceSimulator:GetResolutionAsync())}
+    elseif op == "device_orientation" then
+        local mode=command.orientation
+        local item=Enum.ScreenOrientation[mode]
+        if not item or (mode~="Portrait" and mode~="LandscapeLeft" and mode~="LandscapeRight") then
+            error("orientation must be Portrait, LandscapeLeft, or LandscapeRight")
+        end
+        DeviceSimulator:SetOrientationAsync(item)
+        return {orientation=tostring(DeviceSimulator:GetOrientationAsync())}
+    elseif op == "device_stop" then
+        DeviceSimulator:StopSimulationAsync()
+        return {device=DeviceSimulator:GetDeviceAsync()}
     elseif op == "capabilities" or op == "project_info" then
         local services = {}
         for _, name in ipairs(commonServices()) do
@@ -360,7 +647,7 @@ local function handle(command, insideBatch)
                 "properties", "get_attributes", "tags", "read_script", "script_search", "create",
                 "update", "set_script", "replace_script", "open_script", "delete", "move", "duplicate",
                 "select", "set_attributes", "set_tags", "pivot", "terrain_fill", "terrain_clear",
-                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop"},
+                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop", "playtest_start", "playtest_status", "ui_scan", "device_list", "device_status", "device_select", "device_resolution", "device_orientation", "device_stop"},
             note = "Edit-mode data model only; saving, publishing and gameplay tests use Studio UI."}
     elseif op == "find" then
         local root = resolve(command.root or "game")
@@ -650,6 +937,8 @@ local function execute(command)
         tree = true, find = true, selection = true, properties = true,
         get_attributes = true, tags = true, read_script = true, script_search = true,
         run_state = true, logs = true, diagnostics = true, logs_clear = true,
+        playtest_start = true, playtest_status = true, ui_scan = true, device_list = true, device_status = true,
+        device_select = true, device_resolution = true, device_orientation = true, device_stop = true,
         test_run = true, test_pause = true, test_resume = true, test_stop = true,
         open_script = true, undo = true, redo = true}
     if readOnly[command.op] then return handle(command, false) end

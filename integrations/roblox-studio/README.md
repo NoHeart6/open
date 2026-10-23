@@ -89,3 +89,26 @@ Examples:
 For visual checks use Open desktop_screenshot and desktop_view with Roblox Studio foreground, then repair using desktop_interact and roblox_studio tools. Screenshots capture the desktop and are subject to local permission settings. Real multi-client playtesting, network simulation, saving and publishing require Roblox Studio UI operations through Open's existing desktop controls, not a documented automated guarantee.
 
 Run local offline regression tests with py -3 test_bridge.py from the integration folder. Never commit bridge_token.txt, generated ChatGPTStudioBridge.luau, .snapshots or personal game backups.
+## Version 4.0 � Studio player tests, VirtualInput, device simulation
+
+Open's Roblox Studio plugin supports asynchronous playtests using Roblox StudioTestService. The local plugin currently supports **play**, **run** (no player) and **multiplayer** (1�8 simulated clients), and records structured completion data. Tests are started from a saved or disposable place. A test run can leave edited world state, so `confirm_persistent_changes:true` is required. Tests use temporary scripts, a RemoteEvent, and configuration StringValue; they are removed after the test finishes. A test that fails to start or fails to record enough players is not reported as successful.
+
+Operations:
+
+- `playtest_start`: `{"op":"playtest_start","mode":"play","duration":12,"confirm_persistent_changes":true,"expected_ui_min":1,"steps":[{"type":"key","key":"Space","delay":0.2}]}`. Returns a test ID immediately.
+- `playtest_status`: `{"op":"playtest_status","id":"<test ID>"}`. Returns `state`, `result`, per-client `events`, `players` and `expectedPlayers`. A successful test requires observing the requested players and no input or required-GUI errors.
+- `mode:"multiplayer"` with `players:2` uses StudioTestService's multiple-client mode; multiplayer tests use a minimum duration of 18 seconds to allow client joins.
+- Input steps: `{"type":"key","key":"Space"}`, `{"type":"click","x":400,"y":300}`, or `{"type":"text","text":"hello"}`. The LocalScript creates input with `UserInputService:CreateVirtualInput()`, restricted to the game's own UI. Input reporting is best-effort.
+- Client UI audit sends `ui_audit` and optional `ui_missing` events. Use `expected_ui_min` to require an observed minimum number of visible GuiObjects. Screen objects normally clone to PlayerGui when the character spawns; a zero count should not be interpreted as evidence of a correct layout.
+- `ui_scan`: `{"op":"ui_scan","root":"StarterGui","limit":80}` returns edit-mode GuiObject positions/sizes and their visibility. Those are not a replacement for checking runtime GUI on each device.
+- `device_list`, `device_status`, `device_select` (`device_id`), `device_resolution` (`width`, `height`), `device_orientation` (`Portrait`, `LandscapeLeft`, `LandscapeRight`), `device_stop`. All use StudioDeviceSimulatorService. Restore the default device with `device_stop` after testing.
+
+Visual screenshot validation remains through the **Open desktop_screenshot / desktop_view tools**, not through an unsupported Roblox screenshot API. Open can focus the Studio view, capture images, compare GUI visually, and use desktop_interact to test controls. End-to-end playtest source instrumentation reports input submission; it does not prove a specific GUI handler executed unless the game includes a corresponding test assertion.
+
+Roblox's StudioTestService, VirtualInput and StudioDeviceSimulatorService are Studio-only; they do not run in published experiences. Publishing, multiplayer tests on live servers, persistence tests, performance benchmarking and full asset QA remain outside this release.
+
+References:
+- https://create.roblox.com/docs/reference/engine/classes/StudioTestService
+- https://create.roblox.com/docs/reference/engine/classes/VirtualInput
+- https://create.roblox.com/docs/reference/engine/classes/StudioDeviceSimulatorService
+- https://create.roblox.com/docs/studio/testing-modes
