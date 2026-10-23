@@ -66,6 +66,17 @@ export function server(c:Config,id:Identity,trace?:{requestId:string;record:(eve
    }catch(e){trace?.record({event:'mcp_tool_result',at:new Date().toISOString(),request_id:trace.requestId,tool:name,status:'error'});return {isError:true,content:[{type:'text' as const,text:e instanceof Error?e.message:'Operation failed'}],structuredContent:{error:{code:'OPERATION_FAILED',message:e instanceof Error?e.message:'Operation failed'}},...trace?{_meta:{request_id:trace.requestId}}:{}};}
   });
  };
+ register('roblox_studio','Manage Roblox Studio through the local Bridge plugin; send JSON commands and inspect Windows task status.',{...common,bridge_dir:path.default('C:\\Users\\Administrator\\Documents\\roblox_plugin_connector'),op:z.enum(['status','command']).default('status'),command:z.object({op:z.enum(['ping','tree','selection','properties','read_script','create','update','set_script','delete','duplicate','move','select','batch','undo','redo'])}).passthrough().optional()},false,async input=>{
+  const dir=String(input.bridge_dir);
+  const cmd=input.command as Record<string,unknown>|undefined;
+  if(input.op==='command'&&!cmd)throw new Error('command required');
+  const quote=(v:string)=>"'"+v.replaceAll("'","''")+"'";
+  const json=cmd?JSON.stringify(cmd):'';
+  if(json.length>12000)throw new Error('Command too large');
+  const script=quote(dir+'\\bridge.py');
+  const shellCommand=input.op==='status'?('py -3 '+script+' status'):('py -3 '+script+' send --json '+quote(json)+' --timeout 45');
+  return submitAlias('terminal_execute',input,{shell:'powershell',cwd:dir,command:shellCommand,env:{},interactive:false,pty:false,cols:80,rows:24,success_exit_codes:[0]});
+ });
  register('device_list','List only devices owned by the authenticated OAuth account.',{},true,()=>gatewayRequest(c,id,'/api/devices'));
  register('device_status','Return owned device connectivity and last heartbeat.',{device_id:device},true,async a=>{
   const list=await gatewayRequest(c,id,'/api/devices');const found=(list.devices as Record<string,unknown>[]).find(d=>d.device_id===a.device_id);if(!found)throw new Error('Device not found');return found;

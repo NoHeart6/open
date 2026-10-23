@@ -46,7 +46,7 @@ test('real MCP SDK discovery, schema errors, permission errors and auth challeng
   await client.connect(new StreamableHTTPClientTransport(new URL(c.resource),{requestInit:{headers:{Authorization:`Bearer ${await token('computer:read')}`}}}));
   assert.equal(client.getServerVersion()?.version,serverVersion);
   assert.equal((await fetch(new URL('/healthz',c.resource)).then(response=>response.json()) as {version:string}).version,serverVersion);
-  const tools=await client.listTools();assert.equal(tools.tools.length,Object.keys(actions).length+compatibilityTools.length+10);assert(tools.tools.every(t=>t.inputSchema.type==='object'));assert(tools.tools.every(t=>t.outputSchema?.type==='object'));for(const name of compatibilityTools)assert(tools.tools.some(t=>t.name===name));
+  const tools=await client.listTools();assert.equal(tools.tools.length,Object.keys(actions).length+compatibilityTools.length+11);assert(tools.tools.every(t=>t.inputSchema.type==='object'));assert(tools.tools.every(t=>t.outputSchema?.type==='object'));for(const name of compatibilityTools)assert(tools.tools.some(t=>t.name===name));
   assert.equal(tools.tools.find(t=>t.name==='task_output')?.annotations?.readOnlyHint,true);
   const terminal=tools.tools.find(t=>t.name==='terminal_execute');const properties=terminal?.inputSchema.properties as Record<string,unknown>;assert(properties.interactive&&properties.stdin&&properties.pty&&properties.success_exit_codes);const input=tools.tools.find(t=>t.name==='terminal_input')?.inputSchema.properties as Record<string,unknown>;assert(input.keys&&input.cols&&input.rows);assert.equal(tools.tools.find(t=>t.name==='terminal_screen')?.annotations?.readOnlyHint,true);
   const asset=tools.tools.find(t=>t.name==='asset_deliver');
