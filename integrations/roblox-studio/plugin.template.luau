@@ -11,7 +11,7 @@ local StudioTest = game:GetService("StudioTestService")
 local DeviceSimulator = game:GetService("StudioDeviceSimulatorService")
 local LogService = game:GetService("LogService")
 local RunService = game:GetService("RunService")
-local BRIDGE_VERSION = "4.0.0"
+local BRIDGE_VERSION = "5.0.0"
 local BASE = "http://127.0.0.1:34872"
 local TOKEN = "__BRIDGE_TOKEN__"
 local CLIENT = HttpService:GenerateGUID(false)
@@ -217,6 +217,70 @@ local function encodeValue(value)
     return tostring(value)
 end
 
+
+local function assertChecks(checks, root)
+    if type(checks) ~= "table" or #checks < 1 or #checks > 35 then
+        error("checks must contain 1..35 assertions")
+    end
+    local results = {}
+    local pass = true
+    for i, check in ipairs(checks) do
+        if type(check) ~= "table" or type(check.path) ~= "string" then
+            error("Invalid check at index " .. i)
+        end
+        local ok, found = pcall(function()
+            local current = root or game
+            for part in string.gmatch(check.path, "[^/]+") do
+                if part ~= "game" then
+                    local child = current:FindFirstChild(part)
+                    if not child and current == game then
+                        local good, service = pcall(function() return game:GetService(part) end)
+                        if good then child = service end
+                    end
+                    if not child then return nil end
+                    current = child
+                end
+            end
+            return current
+        end)
+        local obj = ok and found or nil
+        local desiredExist = check.exists
+        local success = desiredExist == false and obj == nil or desiredExist ~= false and obj ~= nil
+        local observed = nil
+        local problem = nil
+        if obj and check.exists ~= false then
+            local readOK, value = pcall(function()
+                if check.attribute then return obj:GetAttribute(check.attribute) end
+                if check.property then
+                    if check.property == "Source" then error("Source assertions prohibited; use editor source verification") end
+                    return obj[check.property]
+                end
+                return obj.ClassName
+            end)
+            if not readOK then
+                success = false
+                problem = tostring(value)
+            else
+                observed = encodeValue(value)
+                if check.equals ~= nil then success = observed == check.equals
+                elseif check.not_equals ~= nil then success = observed ~= check.not_equals
+                elseif check.contains ~= nil then
+                    success = type(observed) == "string"
+                        and string.find(observed, tostring(check.contains), 1, true) ~= nil
+                elseif check.gt ~= nil then
+                    success = type(observed) == "number" and type(check.gt) == "number" and observed > check.gt
+                elseif check.lt ~= nil then
+                    success = type(observed) == "number" and type(check.lt) == "number" and observed < check.lt
+                end
+            end
+        end
+        pass = pass and success
+        table.insert(results, {index=i, id=tostring(check.id or i):sub(1,64),
+            pass=success, path=check.path, observed=observed, error=problem})
+    end
+    return {passed=pass, total=#results, results=results}
+end
+
 local function setProperties(instance, props)
     if type(props) ~= "table" then error("properties must be an object") end
     local count = 0
@@ -312,6 +376,53 @@ task.spawn(function()
     for _, item in ipairs(events) do
         if item.event == "input_error" or item.event == "ui_missing" then passed = false end
     end
+    for index, check in ipairs(settings.checks or {}) do
+        if check.scope == "server" then
+            local ok, success, value = pcall(function()
+                local parts=string.split(check.path, "/")
+                local instance=game
+                for _, part in ipairs(parts) do
+                    if part~="game" then
+                        local nextNode = instance:FindFirstChild(part)
+                        if not nextNode and instance==game then
+                            local good, svc=pcall(function() return game:GetService(part) end)
+                            if good then nextNode=svc end
+                        end
+                        instance=nextNode
+                        if not instance then break end
+                    end
+                end
+                if check.exists==false then return instance==nil, instance and "present" or "absent" end
+                if not instance then return false, "not found" end
+                local raw
+                if check.attribute then raw=instance:GetAttribute(check.attribute)
+                elseif check.property then raw=instance[check.property]
+                else raw=instance.ClassName end
+                local matched=true
+                if check.equals ~= nil then matched=raw==check.equals
+                elseif check.not_equals ~= nil then matched=raw~=check.not_equals
+                elseif check.contains ~= nil then
+                    matched=type(raw)=="string" and raw:find(check.contains,1,true)~=nil
+                elseif check.gt ~= nil then matched=type(raw)=="number" and raw>check.gt
+                elseif check.lt ~= nil then matched=type(raw)=="number" and raw<check.lt end
+                return matched, tostring(raw)
+            end)
+            local valid = ok and success
+            if not valid then passed=false end
+            table.insert(events, {player="server", event=valid and "assert_pass" or "assert_fail",
+                result=tostring(check.id or index):sub(1,60) .. ":" .. tostring(ok and value or success):sub(1,180)})
+        end
+    end
+    local completed={}
+    for _,item in ipairs(events) do
+        if item.event=="client_done" then completed[item.player]=true end
+        if item.event=="assert_fail" then passed=false end
+    end
+    if expected>0 then
+        local complete=0
+        for _ in pairs(completed) do complete+=1 end
+        if complete<expected then passed=false end
+    end
     local result = {success=passed, players=#observed, expectedPlayers=expected,
         playerNames=observed, livePlayers=#names,
         events=events, duration=os.clock()-started, mode=tostring(settings.mode),
@@ -401,6 +512,40 @@ if #steps > 0 then
         end
     end
 end
+local function checkClient(item)
+    local root = item.path:match("^([^/]+)") or ""
+    local current
+    if root == "PlayerGui" then current = player:FindFirstChildOfClass("PlayerGui")
+    elseif root == "Workspace" then current = workspace
+    elseif root == "ReplicatedStorage" then current = ReplicatedStorage
+    else return false, "Unsupported client root" end
+    for segment in item.path:gmatch("/([^/]+)") do
+        current = current and current:FindFirstChild(segment)
+    end
+    if item.exists == false then return current == nil, current and "present" or "absent" end
+    if not current then return false, "not found" end
+    local ok, observed = pcall(function()
+        if item.attribute then return current:GetAttribute(item.attribute) end
+        return item.property and current[item.property] or current.ClassName
+    end)
+    if not ok then return false, tostring(observed) end
+    local passed = true
+    if item.equals ~= nil then passed = observed == item.equals
+    elseif item.not_equals ~= nil then passed = observed ~= item.not_equals
+    elseif item.contains ~= nil then
+        passed = type(observed)=="string" and observed:find(item.contains,1,true) ~= nil
+    elseif item.gt ~= nil then passed=type(observed)=="number" and observed > item.gt
+    elseif item.lt ~= nil then passed=type(observed)=="number" and observed < item.lt end
+    return passed, tostring(observed)
+end
+for i, item in ipairs(settings.checks or {}) do
+    if item.scope == "client" then
+        task.wait(math.clamp(tonumber(item.delay) or 0.15, 0, 2))
+        local ok, passed, observed = pcall(checkClient, item)
+        report(ok and passed and "assert_pass" or "assert_fail",
+            tostring(item.id or i) .. ":" .. tostring(ok and observed or passed):sub(1,160))
+    end
+end
 report("client_done", player.Name)
 ]==]
 
@@ -464,9 +609,18 @@ local function beginStudioTest(command)
             error("Text step limited to 120 characters")
         end
     end
+    local checks = command.checks or {}
+    if type(checks) ~= "table" or #checks > 25 then error("checks must contain up to 25 entries") end
+    for i, check in ipairs(checks) do
+        if type(check) ~= "table" or type(check.path) ~= "string" or #check.path > 300
+            or (check.scope ~= "client" and check.scope ~= "server") then
+            error("Invalid runtime assertion at " .. i)
+        end
+        if check.property == "Source" then error("Source checks prohibited") end
+    end
     local id = HttpService:GenerateGUID(false)
     local expectedUiMin=math.clamp(math.floor(tonumber(command.expected_ui_min) or 0),0,150)
-    local payload = {mode=mode, duration=duration, steps=steps, id=id,
+    local payload = {mode=mode, duration=duration, steps=steps, checks=checks, id=id,
         expectedUiMin=expectedUiMin,
         players=mode=="multiplayer" and players or (mode=="run" and 0 or 1)}
     local parts=prepareStudioTest(payload)
@@ -507,6 +661,8 @@ local function handle(command, insideBatch)
     local op = command.op
     if op == "ping" then
         return {pong = true, place = game.Name, placeId = game.PlaceId, client = CLIENT, version = BRIDGE_VERSION}
+    elseif op == "assert_state" then
+        return assertChecks(command.checks)
     elseif op == "run_state" then
         return {
             isEdit = RunService:IsEdit(),
@@ -647,7 +803,7 @@ local function handle(command, insideBatch)
                 "properties", "get_attributes", "tags", "read_script", "script_search", "create",
                 "update", "set_script", "replace_script", "open_script", "delete", "move", "duplicate",
                 "select", "set_attributes", "set_tags", "pivot", "terrain_fill", "terrain_clear",
-                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop", "playtest_start", "playtest_status", "ui_scan", "device_list", "device_status", "device_select", "device_resolution", "device_orientation", "device_stop"},
+                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop", "playtest_start", "playtest_status", "ui_scan", "assert_state", "device_list", "device_status", "device_select", "device_resolution", "device_orientation", "device_stop"},
             note = "Edit-mode data model only; saving, publishing and gameplay tests use Studio UI."}
     elseif op == "find" then
         local root = resolve(command.root or "game")
@@ -937,7 +1093,7 @@ local function execute(command)
         tree = true, find = true, selection = true, properties = true,
         get_attributes = true, tags = true, read_script = true, script_search = true,
         run_state = true, logs = true, diagnostics = true, logs_clear = true,
-        playtest_start = true, playtest_status = true, ui_scan = true, device_list = true, device_status = true,
+        playtest_start = true, playtest_status = true, ui_scan = true, assert_state = true, device_list = true, device_status = true,
         device_select = true, device_resolution = true, device_orientation = true, device_stop = true,
         test_run = true, test_pause = true, test_resume = true, test_stop = true,
         open_script = true, undo = true, redo = true}

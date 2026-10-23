@@ -164,3 +164,4 @@ The MCP roblox_studio tool connects to an installed local Roblox Studio plugin.
 See integrations/roblox-studio/README.md for installation and command examples.
 Open Roblox Studio v3 adds simulation diagnostics, log capture, and local Luau backup/guarded restore. See integrations/roblox-studio/README.md.
 Roblox Studio integration v4 supports player and multi-client test automation, VirtualInput test steps, GUI auditing and device simulation; see integrations/roblox-studio/README.md.
+Roblox Studio integration v5 adds assertions, guided repair with verification and rollback, error diagnosis and saved place recovery. See integrations/roblox-studio/V5_GUIDE.md.

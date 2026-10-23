@@ -5,3 +5,5 @@ ChatGPTStudioBridge.luau
 .snapshots/
 __pycache__/
 *.pyc
+
+.place_backups/

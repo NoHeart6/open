@@ -112,3 +112,6 @@ References:
 - https://create.roblox.com/docs/reference/engine/classes/VirtualInput
 - https://create.roblox.com/docs/reference/engine/classes/StudioDeviceSimulatorService
 - https://create.roblox.com/docs/studio/testing-modes
+
+## Version 5.0
+Open now supports editor and runtime assertions, error diagnosis, guarded repair-and-verify with automatic source rollback, and SHA-256 verified recovery copies of saved .rbxl/.rbxlx places. See [V5_GUIDE.md](V5_GUIDE.md) for safety constraints, commands and tests.

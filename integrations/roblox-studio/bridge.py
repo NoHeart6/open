@@ -3,6 +3,8 @@ import argparse
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
+import shutil
 import hashlib
 from datetime import datetime, timezone
 import os
@@ -269,6 +271,188 @@ def prepare_script_backups(command):
         print("Backup ID:",snapshot["id"],"for",path,file=sys.stderr)
 
 
+
+PLACE_BACKUPS = ROOT / ".place_backups"
+PLACE_EXTENSIONS = {".rbxl", ".rbxlx"}
+
+def validate_place_path(filename):
+    p = Path(filename).resolve(strict=True)
+    user = Path.home().resolve()
+    roots = [user / folder for folder in ("Documents", "Desktop", "Pictures")]
+    if p.suffix.lower() not in PLACE_EXTENSIONS or not p.is_file():
+        raise ValueError("Existing .rbxl or .rbxlx place file required")
+    if not any(p.is_relative_to(root.resolve()) for root in roots):
+        raise ValueError("Place file must be under Documents, Desktop, or Pictures")
+    if p.stat().st_size > 120 * 1024 * 1024:
+        raise ValueError("Place exceeds local backup size limit")
+    return p
+
+def file_digest(p):
+    digest=hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda:f.read(512*1024),b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+def backup_place_file(filename):
+    p=validate_place_path(filename)
+    PLACE_BACKUPS.mkdir(exist_ok=True)
+    uid=uuid.uuid4().hex
+    dest=PLACE_BACKUPS / (uid+p.suffix.lower())
+    temp=PLACE_BACKUPS / (uid+".partial")
+    shutil.copy2(p,temp)
+    try:
+        expected=file_digest(p)
+        if file_digest(temp)!=expected:
+            raise IOError("Backup verification mismatch")
+        temp.replace(dest)
+    finally:
+        if temp.exists(): temp.unlink()
+    metadata={"id":uid,"at":datetime.now(timezone.utc).isoformat(),
+        "source_path":str(p),"sha256":expected,"bytes":dest.stat().st_size,
+        "suffix":p.suffix.lower()}
+    with (PLACE_BACKUPS/(uid+".json")).open("x",encoding="utf-8") as f:
+        json.dump(metadata,f,ensure_ascii=False)
+    return metadata | {"message":"Only the saved place file is copied. Unsaved Studio edits are NOT included."}
+
+def read_place_backup(uid):
+    if not isinstance(uid,str) or len(uid)!=32 or any(c not in "0123456789abcdef" for c in uid):
+        raise ValueError("Invalid place backup ID")
+    data=json.loads((PLACE_BACKUPS/(uid+".json")).read_text(encoding="utf-8"))
+    if data.get("id")!=uid or data.get("suffix") not in PLACE_EXTENSIONS:
+        raise ValueError("Place backup metadata invalid")
+    p=PLACE_BACKUPS/(uid+data["suffix"])
+    if not p.is_file() or p.stat().st_size!=data["bytes"] or file_digest(p)!=data["sha256"]:
+        raise ValueError("Place backup has been modified or corrupted")
+    return data,p
+
+def restore_place_copy(uid):
+    data,source=read_place_backup(uid)
+    outdir=PLACE_BACKUPS/"recovered"
+    outdir.mkdir(exist_ok=True)
+    output=outdir/(f"{Path(data['source_path']).stem}-{uid[:12]}"+data["suffix"])
+    if output.exists(): raise FileExistsError("Recovery output already exists")
+    shutil.copy2(source,output)
+    if file_digest(output)!=data["sha256"]:
+        output.unlink(missing_ok=True)
+        raise IOError("Recovered file checksum mismatch")
+    return {"recovered_path":str(output),"sha256":data["sha256"],"original_path":data["source_path"],
+        "note":"Original file unchanged. Open recovered copy in Studio manually and save it after verification."}
+
+def validate_checks(checks):
+    if not isinstance(checks,list) or len(checks)>25:
+        raise ValueError("checks must be an array of at most 25 assertions")
+    for item in checks:
+        if not isinstance(item,dict) or item.get("scope") not in ("client","server"):
+            raise ValueError("Each runtime assertion needs scope client or server")
+        path=item.get("path")
+        if not isinstance(path,str) or len(path)>300 or not path:
+            raise ValueError("Invalid assertion path")
+        if item.get("property")=="Source":
+            raise ValueError("Source assertions are not supported")
+    return checks
+
+def repair_verify(command):
+    path=command.get("path")
+    source=command.get("source")
+    expected=command.get("expected_sha256")
+    if not isinstance(path,str) or not isinstance(source,str) or not isinstance(expected,str):
+        raise ValueError("repair_verify requires path, source, expected_sha256")
+    if len(source.encode("utf-8"))>800000 or len(expected)!=64:
+        raise ValueError("Invalid source size or expected_sha256")
+    checks=validate_checks(command.get("checks",[]))
+    if not checks: raise ValueError("repair_verify needs at least one runtime assertion; a launched player alone does not verify the fix")
+    mode=command.get("mode","play")
+    if mode not in ("play","multiplayer"):
+        raise ValueError("repair_verify mode must be play or multiplayer")
+    duration=int(command.get("duration",14))
+    if not 5<=duration<=90:
+        raise ValueError("duration must be from 5 to 90 seconds")
+    if command.get("confirm_persistent_changes") is not True:
+        raise ValueError("repair_verify requires confirm_persistent_changes=true on a disposable place")
+    before=studio_command({"op":"read_script","path":path})
+    if source_hash(before["source"])!=expected:
+        raise ValueError("Script has changed since expected_sha256; refusing edit")
+    saved=snapshot_script_data(before)
+    changed=False
+    test_id=None
+    detail={"backup_id":saved["id"],"path":path}
+    try:
+        studio_command({"op":"set_script","path":path,"source":source,
+                        "expected_source":before["source"]})
+        changed=True
+        check_source=studio_command({"op":"read_script","path":path})
+        if source_hash(check_source["source"])!=source_hash(source):
+            raise ValueError("Editor source did not match requested fix")
+        started=studio_command({"op":"playtest_start","mode":mode,
+            "players":int(command.get("players",2)),"duration":duration,
+            "checks":checks,"expected_ui_min":int(command.get("expected_ui_min",0)),
+            "confirm_persistent_changes":True})
+        test_id=started["id"]
+        deadline=time.monotonic()+duration+65
+        while time.monotonic()<deadline:
+            status=studio_command({"op":"playtest_status","id":test_id},timeout=20)
+            if status.get("state") in ("done","failed"):
+                detail["test"]=status
+                if status.get("state")!="done" or not (status.get("result") or {}).get("success"):
+                    raise RuntimeError("Playtest assertions failed")
+                detail["state"]="verified"
+                detail["applied_sha256"]=source_hash(source)
+                return detail
+            time.sleep(1.0)
+        raise TimeoutError("Playtest result not available; repair left unchanged until safe recovery")
+    except Exception as exc:
+        detail["error"]=str(exc)
+        if changed:
+            # Do not modify the editor while a test may still be running.
+            if test_id and "test" not in detail:
+                detail["state"]="manual_recovery_required"
+                return detail
+            try:
+                current=studio_command({"op":"read_script","path":path},timeout=25)
+                if source_hash(current["source"])!=source_hash(source):
+                    raise ValueError("Another editor changed source; refusing rollback")
+                snapshot_script_data(current)
+                studio_command({"op":"set_script","path":path,
+                    "source":before["source"],"expected_source":current["source"]},timeout=25)
+                detail["state"]="rolled_back"
+            except Exception as rollback_error:
+                detail["state"]="manual_recovery_required"
+                detail["rollback_error"]=str(rollback_error)
+        else:
+            detail["state"]="rejected"
+        return detail
+
+
+def diagnose_errors(command):
+    since=int(command.get("since",0))
+    data=studio_command({"op":"logs","since":since,"limit":120},timeout=25)
+    errors=[item for item in data.get("logs",[])
+            if "error" in str(item.get("severity","")).lower()]
+    issues=[]
+    pattern=re.compile(r"(?P<path>(?:ServerScriptService|ReplicatedStorage|StarterPlayer|StarterGui|Workspace)[/\w. -]+):(?P<line>\d+):")
+    for log in errors[:30]:
+        msg=str(log.get("text",""))[:1800]
+        found=pattern.search(msg)
+        issue={"id":log.get("id"),"message":msg,"severity":log.get("severity"),
+               "path":None,"line":None}
+        if found:
+            location=found.group("path").replace(".", "/").replace("game/","")
+            issue["path"]=location
+            issue["line"]=int(found.group("line"))
+            try:
+                source=studio_command({"op":"read_script","path":location},timeout=15)["source"]
+                lines=source.splitlines()
+                ln=issue["line"]
+                if 1<=ln<=len(lines):
+                    issue["excerpt"]=[{"line":i+1,"text":lines[i][:220]}
+                        for i in range(max(0,ln-3),min(len(lines),ln+2))]
+            except (RuntimeError,ValueError,KeyError):
+                pass
+        issues.append(issue)
+    return {"issues":issues,"count":len(issues),"nextSince":data.get("nextSince",since),
+        "limitations":"Only LogService messages captured by this plugin; suspected paths are hints, not proof. ChatGPT must inspect context before proposing a patch."}
+
 def send(args):
     if args.file:
         command = json.loads(Path(args.file).read_text(encoding="utf-8-sig"))
@@ -283,7 +467,7 @@ def send(args):
         if args.depth is not None:
             command["depth"] = args.depth
     def resolve_sources(action):
-        if action.get("op") == "set_script" and "source_file" in action:
+        if action.get("op") in ("set_script","repair_verify") and "source_file" in action:
             supplied = action.pop("source_file")
             if not isinstance(supplied, str):
                 raise ValueError("source_file must be a string")
@@ -300,6 +484,33 @@ def send(args):
     if not isinstance(command, dict) or not isinstance(command.get("op"), str):
         raise ValueError("Command requires op")
     op=command["op"]
+    if op=="diagnose_errors":
+        data=diagnose_errors(command)
+        print(json.dumps({"state":"done","result":data},ensure_ascii=False,indent=2))
+        return
+    if op=="place_backup":
+        data=backup_place_file(command["path"])
+        print(json.dumps({"state":"done","result":data},indent=2))
+        return
+    if op=="place_backups":
+        records=[]
+        for f in sorted(PLACE_BACKUPS.glob("*.json"),reverse=True):
+            try:
+                info=json.loads(f.read_text(encoding="utf-8"))
+                if info["id"] and info["suffix"] in PLACE_EXTENSIONS: records.append(info)
+            except (ValueError,OSError,KeyError): pass
+            if len(records)>=min(max(int(command.get("limit",30)),1),100):break
+        print(json.dumps({"state":"done","result":{"backups":records}},indent=2))
+        return
+    if op=="place_restore":
+        data=restore_place_copy(command.get("snapshot_id"))
+        print(json.dumps({"state":"done","result":data},indent=2))
+        return
+    if op=="repair_verify":
+        resolve_sources(command)
+        result=repair_verify(command)
+        print(json.dumps({"state":"done","result":result},ensure_ascii=False,indent=2))
+        return
     if op=="snapshot_script":
         data=studio_command({"op":"read_script","path":command["path"]})
         print(json.dumps({"state":"done","result":snapshot_script_data(data)},indent=2))
