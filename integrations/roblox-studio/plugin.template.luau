@@ -7,7 +7,9 @@ local History = game:GetService("ChangeHistoryService")
 local ScriptEditor = game:GetService("ScriptEditorService")
 local Tags = game:GetService("CollectionService")
 local InsertService = game:GetService("InsertService")
-local BRIDGE_VERSION = "2.0.0"
+local LogService = game:GetService("LogService")
+local RunService = game:GetService("RunService")
+local BRIDGE_VERSION = "3.0.1"
 local BASE = "http://127.0.0.1:34872"
 local TOKEN = "__BRIDGE_TOKEN__"
 local CLIENT = HttpService:GenerateGUID(false)
@@ -15,6 +17,22 @@ local active = true
 local running = true
 local successfulRequests = 0
 local lastAction = "No commands yet"
+local simulationOwned = false
+local outputBuffer = {}
+local outputSequence = 0
+local MAX_LOGS = 240
+local logListener = LogService.MessageOut:Connect(function(message, messageType)
+    outputSequence += 1
+    table.insert(outputBuffer, {
+        id = outputSequence,
+        severity = tostring(messageType),
+        text = tostring(message):sub(1, 1800),
+        clock = os.time()
+    })
+    if #outputBuffer > MAX_LOGS then
+        table.remove(outputBuffer, 1)
+    end
+end)
 
 local toolbar = plugin:CreateToolbar("ChatGPT Bridge")
 local toggle = toolbar:CreateButton("ChatGPTBridgePanel", "Open ChatGPT Bridge", "", "ChatGPT")
@@ -90,6 +108,7 @@ pauseButton.MouseButton1Click:Connect(function()
 end)
 plugin.Unloading:Connect(function()
     running = false
+    logListener:Disconnect()
 end)
 
 local function getPath(instance)
@@ -260,6 +279,73 @@ local function handle(command, insideBatch)
     local op = command.op
     if op == "ping" then
         return {pong = true, place = game.Name, placeId = game.PlaceId, client = CLIENT, version = BRIDGE_VERSION}
+    elseif op == "run_state" then
+        return {
+            isEdit = RunService:IsEdit(),
+            isRunning = RunService:IsRunning(),
+            isRunMode = RunService:IsRunMode(),
+            simulationOwned = simulationOwned,
+            version = BRIDGE_VERSION
+        }
+    elseif op == "logs" or op == "diagnostics" then
+        local since = math.max(0, tonumber(command.since) or 0)
+        local limit = math.clamp(tonumber(command.limit) or 60, 1, 120)
+        local query = tostring(command.query or ""):lower()
+        local severity = tostring(command.severity or ""):lower()
+        local matchesLog = {}
+        local errorCount, warningCount = 0, 0
+        for _, entry in ipairs(outputBuffer) do
+            local level = entry.severity:lower()
+            if level:find("error", 1, true) then errorCount += 1 end
+            if level:find("warn", 1, true) then warningCount += 1 end
+            if entry.id > since and (severity == "" or level:find(severity, 1, true))
+                and (query == "" or entry.text:lower():find(query, 1, true)) then
+                table.insert(matchesLog, entry)
+            end
+        end
+        local truncated = #matchesLog > limit
+        while #matchesLog > limit do table.remove(matchesLog, 1) end
+        return {
+            version = BRIDGE_VERSION,
+            logs = matchesLog,
+            count = #matchesLog,
+            truncated = truncated,
+            oldestAvailable = #outputBuffer > 0 and outputBuffer[1].id or 0,
+            nextSince = outputSequence,
+            errors = errorCount,
+            warnings = warningCount,
+            isRunning = RunService:IsRunning(),
+            isEdit = RunService:IsEdit(),
+            note = "Only messages observed by this Studio plugin are included. Client/output messages from other contexts might be missing."
+        }
+    elseif op == "logs_clear" then
+        table.clear(outputBuffer)
+        return {cleared = true, nextSince = outputSequence}
+    elseif op == "test_run" then
+        if simulationOwned or RunService:IsRunning() then error("Test simulation already active; check run_state") end
+        if command.confirm_persistent_changes ~= true then
+            error("RunService Stop does not restore the pretest world. Set confirm_persistent_changes=true after saving an expendable test place.")
+        end
+        RunService:Run()
+        simulationOwned = true
+        return {started = true, isRunning = RunService:IsRunning(), mode = "simulation_no_player"}
+    elseif op == "test_pause" then
+        if not RunService:IsRunning() then error("Simulation is not running") end
+        RunService:Pause()
+        return {paused = true}
+    elseif op == "test_resume" then
+        if RunService:IsRunning() then error("Simulation is already running") end
+        if not simulationOwned then error("No owned paused simulation; use test_run") end
+        RunService:Run()
+        return {resumed = true}
+    elseif op == "test_stop" then
+        if not simulationOwned and not RunService:IsRunning() then error("No simulation to stop") end
+        if command.confirm_persistent_changes ~= true then
+            error("RunService:Stop preserves simulation changes. Set confirm_persistent_changes=true on an expendable test place.")
+        end
+        RunService:Stop()
+        simulationOwned = false
+        return {stopped = true, worldRestored = false}
     elseif op == "capabilities" or op == "project_info" then
         local services = {}
         for _, name in ipairs(commonServices()) do
@@ -274,7 +360,7 @@ local function handle(command, insideBatch)
                 "properties", "get_attributes", "tags", "read_script", "script_search", "create",
                 "update", "set_script", "replace_script", "open_script", "delete", "move", "duplicate",
                 "select", "set_attributes", "set_tags", "pivot", "terrain_fill", "terrain_clear",
-                "insert_asset", "batch", "undo", "redo"},
+                "insert_asset", "batch", "undo", "redo", "run_state", "logs", "diagnostics", "logs_clear", "test_run", "test_pause", "test_resume", "test_stop"},
             note = "Edit-mode data model only; saving, publishing and gameplay tests use Studio UI."}
     elseif op == "find" then
         local root = resolve(command.root or "game")
@@ -563,6 +649,8 @@ local function execute(command)
     local readOnly = {ping = true, capabilities = true, project_info = true,
         tree = true, find = true, selection = true, properties = true,
         get_attributes = true, tags = true, read_script = true, script_search = true,
+        run_state = true, logs = true, diagnostics = true, logs_clear = true,
+        test_run = true, test_pause = true, test_resume = true, test_stop = true,
         open_script = true, undo = true, redo = true}
     if readOnly[command.op] then return handle(command, false) end
     local recording = History:TryBeginRecording("ChatGPTBridge:" .. tostring(command.op), "ChatGPT " .. tostring(command.op))

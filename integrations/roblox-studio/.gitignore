@@ -1,0 +1,7 @@
+bridge_token.txt
+bridge.log
+ChatGPTStudioBridge.luau
+*.rbxmx
+.snapshots/
+__pycache__/
+*.pyc

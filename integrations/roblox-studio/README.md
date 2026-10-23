@@ -68,3 +68,24 @@ set_attributes: {"op":"set_attributes","path":"Workspace/Door","attributes":{"Lo
 set_script from file: {"op":"set_script","path":"ReplicatedStorage/System","class":"ModuleScript","source_file":"scripts/System.luau"}
 terrain_fill: {"op":"terrain_fill","shape":"ball","center":{"x":0,"y":0,"z":0},"radius":12,"material":"Grass"}
 pivot: {"op":"pivot","path":"Workspace/House","cframe":{"__type":"CFrame","x":0,"y":10,"z":0}}
+## Version 3.0.1 - simulation, diagnostics, safe source snapshots
+
+The Studio plugin now exposes run_state; test_run, test_pause, test_resume and test_stop; logs, diagnostics, and logs_clear. Run and Stop require confirm_persistent_changes=true. Test simulation uses RunService:Run() WITHOUT a player, not Roblox's usual Play button. RunService:Stop() does not restore the place to its pre-simulation state. Test in a disposable place or save a backup first.
+
+The plugin retains 240 messages observed by LogService.MessageOut, including warnings and errors. Query logs with since, severity, query and limit. Messages from isolated contexts may be missing, and clearing plugin logs does not clear Roblox Studio's other output windows.
+
+Python bridge.py additionally handles snapshot_script, list_snapshots and restore_script commands via the standard roblox_studio command interface. Snapshots save Luau editor source, an immutable ID, timestamp, path and SHA-256 under the PRIVATE .snapshots folder on the paired Windows computer. On set_script / replace_script, the bridge automatically saves an existing source and adds an expected_source precondition before modifying. restore_script requires a matching expected_sha256, unless force=true is deliberately specified; it preserves the replaced source in another backup first.
+
+Examples:
+{"op":"run_state"}
+{"op":"test_run","confirm_persistent_changes":true}
+{"op":"logs","query":"Exception","limit":30}
+{"op":"diagnostics","since":0,"severity":"warning"}
+{"op":"test_stop","confirm_persistent_changes":true}
+{"op":"snapshot_script","path":"ReplicatedStorage/Config"}
+{"op":"list_snapshots","path":"ReplicatedStorage/Config"}
+{"op":"restore_script","snapshot_id":"32-char-hex-id","expected_sha256":"64-char-current-source-sha256"}
+
+For visual checks use Open desktop_screenshot and desktop_view with Roblox Studio foreground, then repair using desktop_interact and roblox_studio tools. Screenshots capture the desktop and are subject to local permission settings. Real multi-client playtesting, network simulation, saving and publishing require Roblox Studio UI operations through Open's existing desktop controls, not a documented automated guarantee.
+
+Run local offline regression tests with py -3 test_bridge.py from the integration folder. Never commit bridge_token.txt, generated ChatGPTStudioBridge.luau, .snapshots or personal game backups.

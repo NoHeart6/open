@@ -162,3 +162,4 @@ The MCP tool `roblox_studio` exposes an existing locally installed Roblox Studio
 
 The MCP roblox_studio tool connects to an installed local Roblox Studio plugin.
 See integrations/roblox-studio/README.md for installation and command examples.
+Open Roblox Studio v3 adds simulation diagnostics, log capture, and local Luau backup/guarded restore. See integrations/roblox-studio/README.md.

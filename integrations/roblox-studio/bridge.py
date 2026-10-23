@@ -3,6 +3,8 @@ import argparse
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import hashlib
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import secrets
@@ -195,6 +197,78 @@ def start():
                 break
     raise RuntimeError("Bridge not started; inspect bridge.log")
 
+
+SNAPSHOTS = ROOT / ".snapshots"
+
+def source_hash(source):
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+def snapshot_script_data(data):
+    source = data["source"]
+    if not isinstance(source, str) or len(source.encode("utf-8")) > 850000:
+        raise ValueError("Script source must fit in 850 KB")
+    SNAPSHOTS.mkdir(parents=True, exist_ok=True)
+    sid = uuid.uuid4().hex
+    record = {
+        "id": sid,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "path": data["path"],
+        "class": data.get("class", ""),
+        "sha256": source_hash(source),
+        "source": source,
+    }
+    dest = SNAPSHOTS / (sid + ".json")
+    with dest.open("x", encoding="utf-8") as f:
+        json.dump(record, f, ensure_ascii=False)
+    return {k: v for k, v in record.items() if k != "source"}
+
+def lookup_snapshot(sid):
+    if not isinstance(sid, str) or len(sid)!=32 or any(c not in "0123456789abcdef" for c in sid):
+        raise ValueError("Invalid snapshot_id")
+    f = SNAPSHOTS / (sid + ".json")
+    data = json.loads(f.read_text(encoding="utf-8"))
+    if data.get("id") != sid or source_hash(data.get("source", "")) != data.get("sha256"):
+        raise ValueError("Backup corrupt or modified")
+    return data
+
+def studio_command(command, timeout=45):
+    jid = request("POST", "/api/commands", {"command": command})["id"]
+    deadline = time.monotonic()+timeout
+    while time.monotonic() < deadline:
+        result = request("GET", "/api/jobs/" + jid)
+        if result["state"]=="done":
+            return result["result"]
+        if result["state"]=="failed":
+            raise RuntimeError(result.get("error") or "Studio command failed")
+        time.sleep(0.25)
+    raise TimeoutError("Studio command deadline exceeded")
+
+def prepare_script_backups(command):
+    # Store the prior source before ANY edit; set expected_source to block races.
+    operations = command.get("actions") if command.get("op")=="batch" else [command]
+    for item in operations or []:
+        if not isinstance(item, dict) or item.get("op") not in ("set_script","replace_script"):
+            continue
+        path = item.get("path")
+        if not path:
+            continue
+        try:
+            current = studio_command({"op": "read_script", "path": path}, timeout=15)
+        except RuntimeError as exc:
+            if item.get("op")=="set_script" and "Instance not found" in str(exc):
+                continue
+            # In batches a prior action may create the script. Let Studio handle it.
+            if command.get("op")=="batch" and "Instance not found" in str(exc):
+                continue
+            raise
+        previous = current["source"]
+        if item.get("expected_source") is not None and item["expected_source"] != previous:
+            raise ValueError("Source changed; refusing to overwrite unsaved edits")
+        snapshot = snapshot_script_data(current)
+        item.setdefault("expected_source", previous)
+        print("Backup ID:",snapshot["id"],"for",path,file=sys.stderr)
+
+
 def send(args):
     if args.file:
         command = json.loads(Path(args.file).read_text(encoding="utf-8-sig"))
@@ -223,9 +297,39 @@ def send(args):
             for item in action.get("actions", []):
                 if isinstance(item, dict):
                     resolve_sources(item)
-    resolve_sources(command)
     if not isinstance(command, dict) or not isinstance(command.get("op"), str):
         raise ValueError("Command requires op")
+    op=command["op"]
+    if op=="snapshot_script":
+        data=studio_command({"op":"read_script","path":command["path"]})
+        print(json.dumps({"state":"done","result":snapshot_script_data(data)},indent=2))
+        return
+    if op=="list_snapshots":
+        files=sorted(SNAPSHOTS.glob("*.json"),key=lambda x:x.name,reverse=True) if SNAPSHOTS.exists() else []
+        items=[]
+        for f in files:
+            try:
+                data=json.loads(f.read_text(encoding="utf-8"))
+                if not command.get("path") or data.get("path")==command["path"]:
+                    items.append({k:v for k,v in data.items() if k!="source"})
+            except (ValueError, OSError):
+                continue
+            if len(items)>=min(int(command.get("limit",40)),100): break
+        print(json.dumps({"state":"done","result":{"snapshots":items,"count":len(items)}},indent=2))
+        return
+    if op=="restore_script":
+        snap=lookup_snapshot(command.get("snapshot_id"))
+        current=studio_command({"op":"read_script","path":snap["path"]})
+        actual=source_hash(current["source"])
+        if actual!=command.get("expected_sha256") and command.get("force") is not True:
+            raise ValueError("Restore requires matching expected_sha256 or explicit force:true; current source not overwritten")
+        snapshot_script_data(current)
+        command={"op":"set_script","path":snap["path"],"source":snap["source"],"expected_source":current["source"]}
+        # Restore itself is a standard Studio command with a source compare guard.
+    else:
+        resolve_sources(command)
+        prepare_script_backups(command)
+
     jid = request("POST", "/api/commands", {"command": command})["id"]
     print("Job ID:", jid, file=sys.stderr)
     if args.no_wait:
