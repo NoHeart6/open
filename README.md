@@ -157,3 +157,8 @@ OpenCommander berlisensi [MIT](LICENSE). Dependency mempertahankan [lisensi dan 
 ## Roblox Studio bridge (Windows)
 
 The MCP tool `roblox_studio` exposes an existing locally installed Roblox Studio Bridge as a first-class Open tool. On the paired Windows PC, install the Studio plugin and local Python bridge under `C:\Users\Administrator\Documents\roblox_plugin_connector`. The bridge listens on `127.0.0.1:34872` and Roblox Studio must show CONNECTED. The `roblox_studio` tool takes `device_id`, `idempotency_key`, `op: "status" | "command"`, and `command` (the JSON operation supported by bridge.py). Optional `bridge_dir` allows another approved installation location. The tool dispatches to the existing Windows terminal action, so inspect the asynchronous task with `task_status`; it does not expose the local server publicly or require an OpenAI API key.
+
+## Roblox Studio integration
+
+The MCP roblox_studio tool connects to an installed local Roblox Studio plugin.
+See integrations/roblox-studio/README.md for installation and command examples.
