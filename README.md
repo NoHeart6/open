@@ -167,3 +167,4 @@ Roblox Studio integration v4 supports player and multi-client test automation, V
 Roblox Studio integration v5 adds assertions, guided repair with verification and rollback, error diagnosis and saved place recovery. See integrations/roblox-studio/V5_GUIDE.md.
 
 Open Roblox Studio Developer Suite 6.0: 26 local commands, comprehensive docs at integrations/roblox-studio/DEVELOPER_SUITE.md.
+Open Roblox Studio 7.0 governance and intelligence: integrations/roblox-studio/V7_GUIDE.md

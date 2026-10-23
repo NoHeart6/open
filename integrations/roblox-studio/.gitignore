@@ -9,3 +9,5 @@ __pycache__/
 .place_backups/
 
 .studio_suite/
+
+*.secret

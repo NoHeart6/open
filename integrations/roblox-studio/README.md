@@ -118,3 +118,4 @@ Open now supports editor and runtime assertions, error diagnosis, guarded repair
 
 ## Unified Developer Suite 6.0
 Includes 26 operations for project scanning, debugging, GUI/world generation, local sandbox simulations, tests, visual comparison, accessibility audits and release gates. See [DEVELOPER_SUITE.md](DEVELOPER_SUITE.md) for examples and limitations.
+Version 7.0: project intelligence, seeded tests, Windows DPAPI storage, policy/audit and declarative extension SDK. See V7_GUIDE.md.

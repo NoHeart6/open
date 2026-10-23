@@ -11,7 +11,7 @@ local StudioTest = game:GetService("StudioTestService")
 local DeviceSimulator = game:GetService("StudioDeviceSimulatorService")
 local LogService = game:GetService("LogService")
 local RunService = game:GetService("RunService")
-local BRIDGE_VERSION = "6.0.0"
+local BRIDGE_VERSION = "7.0.0"
 local BASE = "http://127.0.0.1:34872"
 local TOKEN = "__BRIDGE_TOKEN__"
 local CLIENT = HttpService:GenerateGUID(false)
@@ -688,6 +688,9 @@ local function handle(command, insideBatch)
                                 sourceBytes += #(item.source)
                             end
                             item.sourceTruncated = #source > length
+                        else
+                            item.sourceTruncated = true
+                            item.sourceUnreadable = true
                         end
                     end
                     if node:IsA("RemoteEvent") or node:IsA("RemoteFunction") then remotes += 1 end

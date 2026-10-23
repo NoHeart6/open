@@ -117,6 +117,20 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(command, dict) or not isinstance(command.get("op"), str):
                 self.respond(400, {"error": "command with string op required"})
                 return
+            import developer_suite_v7_governance as policy
+            status=policy.decision(command)
+            if status["decision"]=="deny":
+                policy.audit_append({"operation":command["op"],"outcome":"denied","context":"studio_transport"})
+                self.respond(403, {"error":status["reason"]})
+                return
+            destructive=command["op"] in policy.IRREVERSIBLE or (
+                command["op"]=="batch" and any(isinstance(item,dict) and
+                    item.get("op") in policy.IRREVERSIBLE for item in command.get("actions",[])))
+            if status["decision"]=="require_confirmation" and destructive:
+                policy.audit_append({"operation":command["op"],"outcome":"denied","context":"destructive_confirmation"})
+                self.respond(403, {"error":"Explicit confirm_persistent_changes:true required for destructive operation"})
+                return
+            policy.audit_append({"operation":command["op"],"outcome":"approved","context":"studio_transport"})
             with lock:
                 if not online():
                     self.respond(409, {"error": "Roblox Studio plugin offline. Open Studio with a place, allow localhost HTTP, and ensure bridge is running."})
@@ -509,6 +523,17 @@ def send(args):
     if op=="repair_verify":
         resolve_sources(command)
         result=repair_verify(command)
+        print(json.dumps({"state":"done","result":result},ensure_ascii=False,indent=2))
+        return
+    if op.startswith("v7_"):
+        import developer_suite_v7_intelligence as intelligence
+        import developer_suite_v7_governance as governance
+        function=intelligence.HANDLERS.get(op) or governance.HANDLERS.get(op)
+        if not function:
+            raise ValueError("Unknown v7 operation")
+        governance.audit_append({"operation":op,"outcome":"approved","context":"developer_suite_v7"})
+        result=function(command,studio_command)
+        governance.audit_append({"operation":op,"outcome":"completed","context":"developer_suite_v7"})
         print(json.dumps({"state":"done","result":result},ensure_ascii=False,indent=2))
         return
     if op.startswith("suite_"):
