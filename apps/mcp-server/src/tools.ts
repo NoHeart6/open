@@ -74,7 +74,9 @@ export function server(c:Config,id:Identity,trace?:{requestId:string;record:(eve
   const json=cmd?JSON.stringify(cmd):'';
   if(json.length>12000)throw new Error('Command too large');
   const script=quote(dir+'\\bridge.py');
-  const shellCommand=input.op==='status'?('py -3 '+script+' status'):('py -3 '+script+' send --json '+quote(json)+' --timeout 45');
+  const shellCommand=input.op==='status'
+    ? 'py -3 '+script+' status'
+    : '$f=Join-Path $env:TEMP ("roblox_bridge_"+[guid]::NewGuid().ToString("N")+".json"); try { [System.IO.File]::WriteAllText($f, '+quote(json)+', (New-Object System.Text.UTF8Encoding($false))); py -3 '+script+' send --file $f --timeout 45; if($LASTEXITCODE -ne 0){throw "Roblox bridge command failed"} } finally { Remove-Item -LiteralPath $f -ErrorAction SilentlyContinue }';
   return submitAlias('terminal_execute',input,{shell:'powershell',cwd:dir,command:shellCommand,env:{},interactive:false,pty:false,cols:80,rows:24,success_exit_codes:[0]});
  });
  register('device_list','List only devices owned by the authenticated OAuth account.',{},true,()=>gatewayRequest(c,id,'/api/devices'));
